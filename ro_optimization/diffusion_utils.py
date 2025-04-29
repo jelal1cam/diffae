@@ -76,26 +76,27 @@ def get_denoiser_fn(diffusion_wrapper, latent_net, t, latent_shape):
 def get_classifier_fn(cls_model, t, latent_shape):
     """
     Constructs and returns a classifier function that, when provided with a
-    flattened latent vector x_flat, unflattens it to shape (B, *latent_shape) and
-    then computes the logits using the classifier for diffusion time t.
-    
+    flattened latent vector x_flat, unflattens it to shape (B, *latent_shape)
+    and then computes the logits using the classifier at diffusion time t.
+
     Args:
-        cls_model: The classifier model. It must have a forward method that accepts
-                   two arguments: (x, t). If not time-conditioned, the model should
-                   be modified to accept an extra (optional) t.
-        t: Either a scalar or a tensor containing the diffusion time(s) at which the
-           classifier should operate.
-        latent_shape: The shape that x_flat should be reshaped to before passing to the classifier.
-        
+        cls_model: The classifier model, expecting forward(x, t).
+        t: Either a scalar or a tensor; will be expanded to (B,) internally.
+        latent_shape: The shape that x_flat should be reshaped to.
     Returns:
-        A function classifier_fn(x_flat) that returns the raw logits computed by the classifier.
+        A function classifier_fn(x_flat) → logits.
     """
     def classifier_fn(x_flat):
-        # Unflatten the latent into the original shape.
+        # 1) Unflatten to (B, *latent_shape)
         x = unflatten_tensor(x_flat, latent_shape)
-        # Forward pass through the classifier.
-        # We assume the classifier's forward method has been modified to accept a 't' parameter.
-        return cls_model(x, t)
+
+        # 2) Ensure t has one entry per example
+        batch_size = x_flat.size(0)
+        t_corr = ensure_time_tensor(t, batch_size)
+
+        # 3) Forward through your time-dependent classifier
+        return cls_model(x, t_corr)
+
     return classifier_fn
 
 def compute_discrete_time_from_target_snr(riem_config, autoenc_conf):

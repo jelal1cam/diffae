@@ -17,13 +17,13 @@ from tqdm import tqdm
 # Project imports
 from config import *
 from dataset import *
-from templates_cls import ffhq128_autoenc_non_linear_time_cls
+from templates_cls import ffhq128_autoenc_non_linear_time_cls_full
 from experiment_classifier import ClsModel
 
 
 def load_cls_model(device):
     # Load the time-dependent latent classifier (which includes the autoencoder)
-    cls_conf = ffhq128_autoenc_non_linear_time_cls()
+    cls_conf = ffhq128_autoenc_non_linear_time_cls_full()
     model = ClsModel(cls_conf)
     ckpt_path = os.path.join("checkpoints", cls_conf.name, "last.ckpt")
     state = torch.load(ckpt_path, map_location="cpu")
@@ -137,10 +137,10 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Evaluate classifier accuracy across diffusion timesteps")
-    parser.add_argument('--max-images', type=int, default=5000, help='Number of images to evaluate')
-    parser.add_argument('--batch-size', type=int, default=32, help='Batch size for evaluation')
+    parser.add_argument('--max-images', type=int, default=6000, help='Number of images to evaluate')
+    parser.add_argument('--batch-size', type=int, default=128, help='Batch size for evaluation')
     parser.add_argument('--num-workers', type=int, default=4, help='DataLoader workers')
-    parser.add_argument('--attribute', type=str, default='Male', help='Target attribute name')
+    parser.add_argument('--attribute', type=str, default='Eyeglasses', help='Target attribute name')
     parser.add_argument('--output-path', type=str, default='ro_optimization/ro_results/infer_RO_start/accuracy.png', help='Base path to save the plot PNGs')
     args = parser.parse_args()
     main(args)

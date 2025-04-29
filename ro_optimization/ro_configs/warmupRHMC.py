@@ -17,7 +17,7 @@ CONFIG = {
     # total “riemannian_steps” for whichever optim. picks up after warm‑up:
     #   - for GD warm‑up we’ll override riemannian_steps→gd_warmup_steps
     #   - for HMC this is the number of full HMC iterations
-    "riemannian_steps": 2,
+    "riemannian_steps": 6,
 
     # ─── RGD (gradient_descent) parameters ─────────────────────────────────
     "riemannian_lr_init": 5e-3,
@@ -36,7 +36,7 @@ CONFIG = {
     
 
     # ─── RHMC (HMC) parameters ──────────────────────────────────────────────
-    "leapfrog_steps": 2,
+    "leapfrog_steps": 3,
     "step_size": 5e-6,
     "momentum_method": "lanczos",
     "sign_for_logdet": -1.0,

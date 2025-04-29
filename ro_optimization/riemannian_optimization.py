@@ -6,40 +6,39 @@ Main Riemannian Optimization routine.
 import os
 import time
 import torch
-# Enable TF32 for float32 matrix multiplies on Ampere+ GPUs
-torch.set_float32_matmul_precision('high')
-
 import torch.multiprocessing as mp
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 
-# Import helper functions from local modules
+# Enable TF32 for float32 matrix multiplies on Ampere+ GPUs
+torch.set_float32_matmul_precision('high')
+
+# Local project imports
 from .config_loader import load_riemannian_config
 from .utils import flatten_tensor, unflatten_tensor
 from .diffusion_utils import DiffusionWrapper, get_classifier_fn, get_score_fn, get_denoiser_fn, compute_discrete_time_from_target_snr
 from .objectives import get_opt_fn
 from .visualization_utils import visualize_trajectory, save_gif_from_rendered_images
 
-# Import project-specific modules (unchanged)
-from templates_latent import ffhq128_autoenc_latent   # autoencoder config
-from templates_cls import ffhq128_autoenc_cls, ffhq128_autoenc_non_linear_cls, ffhq128_autoenc_non_linear_time_cls         # classifier config
+from templates_latent import ffhq128_autoenc_latent
+from templates_cls import ffhq128_autoenc_non_linear_cls
 from experiment import LitModel
 from experiment_classifier import ClsModel
-from dataset import ImageDataset, CelebAttrDataset
+from dataset import CelebAttrDataset
 
-# Riemannian optimization & geometry library (external)
 from data_geometry.optim_function import get_optim_function
 from data_geometry.riemannian_optimization.retraction import create_retraction_fn
 from data_geometry.riemannian_optimization import get_riemannian_optimizer
+
 
 def riemannian_optimization(riem_config_path):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Load the riemannian config
+    # Load Riemannian config
     riem_config = load_riemannian_config(riem_config_path)
 
-    # Load autoencoder model (latent config)
+    # Load autoencoder model
     print("Loading autoencoder model (latent config) ...")
     autoenc_conf = ffhq128_autoenc_latent()
     autoenc_conf.T_eval = 1000
@@ -66,33 +65,50 @@ def riemannian_optimization(riem_config_path):
     cls_model.to(device)
     cls_model.eval()
 
-    # Load data sample and encode to latent space
-    print("Loading data sample ...")
-    data = ImageDataset("imgs_align", image_size=autoenc_conf.img_size,
-                        exts=["jpg", "JPG", "png"], do_augment=False)
-    
-    L = 1  # or any number you want
-    batch = data[0]["img"].unsqueeze(0).repeat(L, 1, 1, 1)  # shape: (L, C, H, W)
-    batch = batch.to(device)
+    # Load dataset and select L samples WITHOUT the target attribute
+    print("Loading dataset using classifier config ...")
+    dataset = cls_model.load_dataset()
+    target_class = "Eyeglasses"
+    cls_id = CelebAttrDataset.cls_to_id[target_class]
+    L = riem_config.get("num_samples", 4)
 
+    print(f"Selecting {L} samples without attribute '{target_class}'...")
+    selected_indices = []
+    for i in range(len(dataset)):
+        sample = dataset[i]
+        if "labels" in sample and sample["labels"][cls_id] == -1:
+            selected_indices.append(i)
+        if len(selected_indices) == L:
+            break
+
+    assert len(selected_indices) == L, f"Could not find {L} samples without the '{target_class}' attribute."
+    batch = torch.stack([dataset[i]["img"] for i in selected_indices]).to(device)
+
+    # ---- OLD VERSION FOR REFERENCE ----
+    # print("Loading data sample ...")
+    # data = ImageDataset("imgs_align", image_size=autoenc_conf.img_size,
+    #                     exts=["jpg", "JPG", "png"], do_augment=False)
+    # L = 1
+    # batch = data[0]["img"].unsqueeze(0).repeat(L, 1, 1, 1).to(device)
+    # -----------------------------------
+
+    # Encode
     cond = model.encode(batch)
-    xT = model.encode_stochastic(batch, cond, T=250)
+    T_render = riem_config.get("T_render", 250)
+    xT = model.encode_stochastic(batch, cond, T=T_render)
     latent_shape = cond.shape[1:]
     x0_flat = flatten_tensor(cond)
 
-    # Check that both models expect normalized latents.
-    assert getattr(cls_model.conf, "manipulate_znormalize", False) == True and getattr(model.conf, "latent_znormalize", False) == True, \
-        f"cls_model.conf.manipulate_znormalize:{cls_model.conf.manipulate_znormalize} and model.conf.latent_znormalize:{model.conf.latent_znormalize}. Both must be True."
-
-    # Normalize the latent before optimization.
+    # Normalize
+    assert getattr(cls_model.conf, "manipulate_znormalize", False) and getattr(model.conf, "latent_znormalize", False)
     x0_flat_normalized = cls_model.normalize(x0_flat)
     riem_config["initial_point"] = x0_flat_normalized
 
+    # Time setup
     t_val = compute_discrete_time_from_target_snr(riem_config, autoenc_conf)
-    batch_size = x0_flat_normalized.size(0)
     t_latent = torch.full((1,), t_val, dtype=torch.float32, device=device)
 
-    # Build latent diffusion process & wrapper
+    # Diffusion & score functions
     print("Building latent diffusion process ...")
     latent_diffusion = autoenc_conf.make_latent_eval_diffusion_conf().make_sampler()
     latent_wrapper = DiffusionWrapper(latent_diffusion)
@@ -102,7 +118,6 @@ def riemannian_optimization(riem_config_path):
     except Exception as e:
         print("Could not compute latent SNR:", e)
 
-    # Build score and denoiser functions
     score_fn = get_score_fn(latent_wrapper, model.ema_model.latent_net, t_latent, latent_shape)
     denoiser_fn = get_denoiser_fn(latent_wrapper, model.ema_model.latent_net, t_latent, latent_shape)
     retraction_fn = create_retraction_fn(
@@ -110,60 +125,27 @@ def riemannian_optimization(riem_config_path):
         denoiser_fn=denoiser_fn
     )
 
-    # Define optimization objective.
-    target_class = "Eyeglasses"
-    cls_id = CelebAttrDataset.cls_to_id[target_class]
-    print(f"Target class '{target_class}' has id {cls_id}")
-    classifier_weight = riem_config.get("classifier_weight", 1.)
+    # Define optimization objective
+    classifier_weight = riem_config.get("classifier_weight", 1.0)
     reg_norm_weight = riem_config.get("reg_norm_weight", 0.5)
     reg_norm_type = riem_config.get("reg_norm_type", "L2")
     classifier_fn = get_classifier_fn(cls_model, torch.zeros_like(t_latent), latent_shape)
-    opt_fn = get_opt_fn(classifier_fn, cls_id, latent_shape, x0_flat_normalized, classifier_weight, reg_norm_weight, reg_norm_type)
+    opt_fn = get_opt_fn(classifier_fn, cls_id, latent_shape, x0_flat_normalized,
+                        classifier_weight, reg_norm_weight, reg_norm_type)
 
-    # Run the riemannian optimizer
-    print("Running riemannian optimization ...")
+    # Run optimization
+    print("Running Riemannian optimization ...")
     riem_opt = get_riemannian_optimizer(score_fn, opt_fn, riem_config, retraction_fn)
     start_time = time.time()
     trajectory, metrics = riem_opt.run()
     elapsed_time = time.time() - start_time
     print(f"Riemannian optimization completed in {elapsed_time:.2f} seconds.")
 
-    # Denormalize each latent in the trajectory (using a for loop)
-    denorm_trajectory = [cls_model.denormalize(latent) for latent in trajectory]
-
-    # Use the last denormalized latent for final rendering.
-    print("Optimized latent obtained.")
-    x_opt_denormalized = unflatten_tensor(denorm_trajectory[-1], latent_shape)
-    T_render = riem_config.get("T_render", 100)
-    manipulated_img = model.render(xT, x_opt_denormalized, T=T_render)
-    manipulated_img = (manipulated_img + 1) / 2.0
-
-    # Save results
+    # Visualization
     output_dir = riem_config.get('log_dir', 'logs')
-    os.makedirs(output_dir, exist_ok=True)
-    original_img = model.render(xT, cond, T=T_render)
-    original_img = (original_img + 1) / 2.0
-
-    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    ax[0].imshow(original_img[0].permute(1, 2, 0).cpu().numpy())
-    ax[0].set_title("Original")
-    ax[0].axis("off")
-    ax[1].imshow(manipulated_img[0].permute(1, 2, 0).cpu().numpy())
-    ax[1].set_title(f"Manipulated ({target_class})")
-    ax[1].axis("off")
-    comp_path = os.path.join(output_dir, "comparison.png")
-    plt.savefig(comp_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"Comparison image saved to {comp_path}")
-
-    # Visualize the optimization trajectory using the pre-denormalized latents.
+    denorm_trajectory = [cls_model.denormalize(latent) for latent in trajectory]
     traj_save_path = os.path.join(output_dir, "trajectory.png")
-    visualize_trajectory(model, xT, denorm_trajectory, latent_shape, T_render, traj_save_path, fast_mode=True)
-
-    rendered_images = visualize_trajectory(
-    model, xT, denorm_trajectory, latent_shape, T_render, traj_save_path, fast_mode=True
-    )
-
+    rendered_images = visualize_trajectory(model, xT, denorm_trajectory, latent_shape, T_render, traj_save_path, fast_mode=True)
     gif_path = os.path.join(output_dir, "trajectory.gif")
     save_gif_from_rendered_images(rendered_images, gif_path, duration_sec=6)
 
@@ -171,8 +153,7 @@ def riemannian_optimization(riem_config_path):
 def main():
     mp.set_start_method("spawn", force=True)
     parser = ArgumentParser(description="Riemannian Optimization on Autoencoder Latent Space")
-    parser.add_argument("--ro-config", type=str, required=True,
-                        help="Path to the riemannian config file (Python file with CONFIG dict)")
+    parser.add_argument("--ro-config", type=str, required=True, help="Path to the riemannian config file")
     args = parser.parse_args()
     riemannian_optimization(args.ro_config)
 

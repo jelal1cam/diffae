@@ -1,4 +1,6 @@
 import torch
+import math 
+from tqdm import tqdm 
 
 def flatten_tensor(x):
     """Flattens a tensor across all dimensions except the batch dimension."""
@@ -21,3 +23,20 @@ def ensure_time_tensor(t, batch_size):
         if t.size(-1) == 1:
             return t.squeeze(-1)
         return t
+
+def encode_xt_in_chunks(ae, batch, cond, T_render, chunk):
+    """
+    Encode input batch into stochastic latent representations in chunks.
+    """
+    B = batch.size(0)
+    enc_chunk = min(chunk, B)
+    n_encode_chunks = math.ceil(B / enc_chunk)
+    xT_pieces = []
+
+    for i in tqdm(range(0, B, enc_chunk), desc="Encoding chunks", total=n_encode_chunks):
+        b_chunk = batch[i : i + enc_chunk]
+        cond_chunk = cond[i : i + enc_chunk]
+        xT_chunk = ae.encode_stochastic(b_chunk, cond_chunk, T=T_render)
+        xT_pieces.append(xT_chunk)
+
+    return torch.cat(xT_pieces, dim=0)
