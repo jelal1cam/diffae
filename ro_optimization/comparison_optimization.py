@@ -166,9 +166,9 @@ def save_comparison_image(rendered_images, linear_images=None, save_path=None):
     plt.close()
 
 
-def multistage_optimization(config_path):
+def multistage_optimization(config_path, gpu_id=0):
     cfg = load_riemannian_config(config_path)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(cfg.get("random_seed", 0))
 
     # Autoencoder
@@ -197,10 +197,10 @@ def multistage_optimization(config_path):
 
     # (2) Load the dataset images with label filter
     ds = cls.load_dataset()
-    cid = CelebAttrDataset.cls_to_id[cfg.get("target_attr", "Wavy_Hair")]
-    L = cfg.get("num_samples", 5)
+    cid = CelebAttrDataset.cls_to_id[cfg.get("target_attr", "Male")]
+    L = cfg.get("num_samples", 10)
 
-    idx = [i for i, s in enumerate(ds) if s["labels"][cid] == -1][25:25+L]
+    idx = [i for i, s in enumerate(ds) if s["labels"][cid] == -1][15:15+L]
     dataset_imgs = torch.stack([ds[i]["img"] for i in idx]).to(device)  # Shape (L, C, H, W)
 
     # (3) Stack external image and dataset images together
@@ -327,5 +327,6 @@ def multistage_optimization(config_path):
 if __name__ == "__main__":
     p = ArgumentParser()
     p.add_argument("--ro-config", required=True)
+    p.add_argument("--gpu-id", type=int, default=0, help="Which GPU to use (default: 0)")
     args = p.parse_args()
-    multistage_optimization(args.ro_config)
+    multistage_optimization(args.ro_config, args.gpu_id)

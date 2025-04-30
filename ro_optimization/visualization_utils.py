@@ -18,67 +18,68 @@ def render_trajectory_images(
     """
     Renders the optimization trajectory by generating images at each optimization step.
 
+    Args:
+        model: autoencoder or diffusion model with .render(subcode, latent, T) method
+        xT: stochastic subcode(s), either:
+             - 4D tensor (B, C, H, W) to be reused across all steps (backward-compatible)
+             - 5D tensor (n_steps, B, C, H, W) for per-step subcodes
+        trajectory: list of flattened latent tensors for each step
+        latent_shape: shape tuple for unflattening latents (C, H, W)
+        T_render: number of diffusion steps for rendering
+        fast_mode: if True, batch-render all frames (faster)
+        chunk_size: optional chunk size for memory-efficient rendering
+
     Returns:
         rendered_images: list of numpy arrays, each of shape (B, H, W, 3) uint8
     """
     n_steps = len(trajectory)
     batch_size = trajectory[0].size(0)
+
+    # Unflatten all trajectory latents into a single batch
+    all_latents = torch.cat([
+        unflatten_tensor(latent, latent_shape) for latent in trajectory
+    ], dim=0)
+
+    # Determine xT layout and prepare all_xT accordingly
+    if xT.ndim == 5:
+        # Per-step subcodes: (n_steps, B, C, H, W)
+        all_xT = xT.view(-1, *xT.shape[2:])
+    elif xT.ndim == 4:
+        # Constant subcode: repeat for each step (backward-compatible)
+        all_xT = xT.repeat(n_steps, 1, 1, 1)
+    else:
+        raise ValueError(f"Unsupported xT shape: {xT.shape}, expected 4D or 5D tensor")
+
     rendered_images = []
 
     if not fast_mode:
-        # generate images step by step
+        # Render frame-by-frame to use individual subcodes or constant code
         for step in range(n_steps):
-            latent_flat = trajectory[step]
-            latent_unflat = unflatten_tensor(latent_flat, latent_shape)
-            imgs = model.render(xT, latent_unflat, T=T_render)
+            latent_unflat = unflatten_tensor(trajectory[step], latent_shape)
+            subcode = xT[step] if xT.ndim == 5 else xT
+            imgs = model.render(subcode, latent_unflat, T=T_render)
             imgs = imgs.clamp(0.0, 1.0)
-            imgs_np = (
-                imgs
-                .mul(255)
-                .byte()
-                .cpu()
-                .permute(0, 2, 3, 1)
-                .numpy()
-            )
+            imgs_np = imgs.mul(255).byte().cpu().permute(0, 2, 3, 1).numpy()
             rendered_images.append(imgs_np)
-
     else:
-        # fast batch rendering with optional chunking
-        # flatten all latents and repeat xT
-        all_latents = torch.cat([
-            unflatten_tensor(latent, latent_shape) for latent in trajectory
-        ], dim=0)
-        # all_latents: (n_steps*B, C, H, W)
-        xT_repeated = xT.repeat(n_steps, 1, 1, 1)
+        # Fast batch rendering with optional chunking
         total = all_latents.shape[0]
-        # choose chunk size if provided, else all at once
         if chunk_size is None or chunk_size >= total:
-            imgs = model.render(xT_repeated, all_latents, T=T_render)
+            imgs = model.render(all_xT, all_latents, T=T_render)
         else:
             chunks = []
             n_chunks = math.ceil(total / chunk_size)
-            for i in tqdm(range(0, total, chunk_size),
-                          desc="Rendering chunks",
-                          total=n_chunks):
+            for i in tqdm(range(0, total, chunk_size), desc="Rendering chunks", total=n_chunks):
                 lat_chunk = all_latents[i : i + chunk_size]
-                xT_chunk = xT_repeated[i : i + chunk_size]
-                chunk_imgs = model.render(xT_chunk, lat_chunk, T=T_render)
-                chunks.append(chunk_imgs)
+                xT_chunk = all_xT[i : i + chunk_size]
+                chunks.append(model.render(xT_chunk, lat_chunk, T=T_render))
             imgs = torch.cat(chunks, dim=0)
 
-        # normalize and reshape
+        # Normalize and split back into per-step frames
         imgs = imgs.clamp(0.0, 1.0)
         imgs = imgs.view(n_steps, batch_size, *imgs.shape[1:])
-        # to numpy list
         for step in range(n_steps):
-            imgs_np = (
-                imgs[step]
-                .mul(255)
-                .byte()
-                .cpu()
-                .permute(0, 2, 3, 1)
-                .numpy()
-            )
+            imgs_np = imgs[step].mul(255).byte().cpu().permute(0, 2, 3, 1).numpy()
             rendered_images.append(imgs_np)
 
     return rendered_images
@@ -192,3 +193,64 @@ def save_comparison_image(rendered_images, save_path):
     if save_path is not None:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
+
+def visualize_comparison_trajectory(
+    rendered_images_riem,
+    rendered_images_linear,
+    save_path=None
+):
+    """
+    Plots a comparison grid of images for Riemannian vs. Linear trajectories.
+    Each row pair shows:
+    Row 2*i:   Riemannian trajectory for sample i
+    Row 2*i+1: Linear trajectory for sample i
+
+    Args:
+        rendered_images_riem: List of numpy arrays [n_steps], each (B, H, W, 3) uint8.
+        rendered_images_linear: List of numpy arrays [n_steps], each (B, H, W, 3) uint8.
+        save_path: Optional path to save the comparison figure.
+    """
+    n_steps = len(rendered_images_riem)
+    if n_steps == 0:
+        print("No images to visualize.")
+        return
+    assert len(rendered_images_linear) == n_steps, "Both trajectories must have the same length."
+    batch_size = rendered_images_riem[0].shape[0]
+    assert rendered_images_linear[0].shape[0] == batch_size, "Batch sizes must match."
+
+    print(f"Creating comparison plot with {n_steps} steps for {batch_size} samples...")
+
+    fig, axes = plt.subplots(
+        2 * batch_size,  # Two rows per sample (Riem top, Linear bottom)
+        n_steps,         # Columns represent time steps
+        figsize=(n_steps * 2, 2 * batch_size * 2), # Adjust size as needed
+        squeeze=False # Always return 2D array for axes
+    )
+
+    for i in range(batch_size): # Iterate through samples in the batch
+        for j in range(n_steps): # Iterate through time steps
+            # Axis for Riemannian trajectory, sample i, step j
+            ax_riem = axes[2 * i, j]
+            ax_riem.imshow(rendered_images_riem[j][i])
+            ax_riem.axis('off')
+            if j == 0: # Label first column
+                ax_riem.text(-0.05, 0.5, f'S{i}\nRiem', horizontalalignment='right', verticalalignment='center', transform=ax_riem.transAxes, fontsize=8, rotation=0)
+            if i == 0: # Add step title to the top row
+                ax_riem.set_title(f"Step {j}", fontsize=10)
+
+            # Axis for Linear trajectory, sample i, step j
+            ax_linear = axes[2 * i + 1, j]
+            ax_linear.imshow(rendered_images_linear[j][i])
+            ax_linear.axis('off')
+            if j == 0: # Label first column
+                 ax_linear.text(-0.05, 0.5, f'S{i}\nLinear', horizontalalignment='right', verticalalignment='center', transform=ax_linear.transAxes, fontsize=8, rotation=0)
+
+    # Adjust layout to prevent labels overlapping titles/images
+    plt.subplots_adjust(left=0.08, right=0.98, top=0.95, bottom=0.02, wspace=0.05, hspace=0.05)
+
+    if save_path is not None:
+        print(f"Saving comparison plot to {save_path}")
+        plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    else:
+        print("[Warning] save_path not provided for comparison plot, plot not saved.")
+    plt.close(fig) # Close the figure to free memory

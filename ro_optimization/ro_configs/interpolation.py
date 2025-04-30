@@ -2,24 +2,18 @@ CONFIG = {
     # Random seed for reproducibility
     "random_seed": 42,
 
-    #Multistage parameters
-    "multistage_steps": 16,
-    "start_diffusion_timestep": 16,
-    "jump_method": 'ddpm',
-
-
     # Riemannian optimization parameters
-    "ro_SNR": 124, #SNR at which Riemannian optimization takes place
+    "ro_SNR": 30, #SNR at which Riemannian optimization takes place
     "reg_lambda": 1e-5,
-    "riemannian_steps": 3,
-    "riemannian_lr_init": 5e-3, #5e-3,
+    "riemannian_steps": 20,
+    "riemannian_lr_init": 8e-2, #2e-2,
     
     # Optimizer selection:
     "optimizer_type": "gradient_descent",  # Choices:["gradient_descent", "trust_region"]
 
     # Optimization function
     "classifier_weight": 1.,
-    "reg_norm_weight": 0.35, 
+    "reg_norm_weight": 0.25,
     "reg_norm_type": "L2",
 
     # Trust-region parameters
@@ -33,9 +27,9 @@ CONFIG = {
     "line_search": "strong_wolfe",
     "wolfe_c1": 1e-4,
     "wolfe_c2": 0.7,
-    "max_bracket": 12,
+    "max_bracket": 15,
     "max_zoom": 10,
-    "max_alpha": 300,
+    "max_alpha": 2000,
     "armijo_rho": 1e-6,
     "armijo_beta": 0.1,
 
@@ -52,10 +46,7 @@ CONFIG = {
     "cg_tol": 1e-6, 
     "cg_max_iter": 15, #20
 
-    #Settings for computing the conditioning number of the metric
-    "estimate_cond": False,   # <-- toggle condition‐number estimation
-
     # Logging
-    "log_dir": "ro_optimization/ro_results/optimization",
+    "log_dir": "ro_optimization/ro_results/interpolation",
     "plot_filename": "combined_plot.png",
 }
