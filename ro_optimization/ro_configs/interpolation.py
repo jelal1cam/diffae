@@ -1,12 +1,13 @@
 CONFIG = {
     # Random seed for reproducibility
     "random_seed": 42,
+    "num_samples": 3, #num interpolations
 
     # Riemannian optimization parameters
     "ro_SNR": 30, #SNR at which Riemannian optimization takes place
     "reg_lambda": 1e-5,
-    "riemannian_steps": 20,
-    "riemannian_lr_init": 8e-2, #2e-2,
+    "riemannian_steps": 50,
+    "riemannian_lr_init": 1e-2, #2e-2,
     
     # Optimizer selection:
     "optimizer_type": "gradient_descent",  # Choices:["gradient_descent", "trust_region"]
@@ -25,8 +26,8 @@ CONFIG = {
 
     # Line search parameters (used by gradient descent branch)
     "line_search": "strong_wolfe",
-    "wolfe_c1": 1e-4,
-    "wolfe_c2": 0.7,
+    "wolfe_c1": 3e-5,
+    "wolfe_c2": 0.8,
     "max_bracket": 15,
     "max_zoom": 10,
     "max_alpha": 2000,
