@@ -21,6 +21,7 @@ import numpy as np
 from argparse import ArgumentParser
 
 # Project imports
+from .entropic_times import derive_sampling_steps
 from .config_loader import load_riemannian_config
 from .utils import flatten_tensor, unflatten_tensor, encode_xt_in_chunks
 from .diffusion_utils import (
@@ -30,7 +31,7 @@ from .diffusion_utils import (
     get_classifier_fn,
     compute_discrete_time_from_target_snr
 )
-from .objectives import get_opt_fn
+from .objectives import get_opt_fn, get_opt_fn_debug
 from .visualization_utils import render_trajectory_images, visualize_trajectory, save_gif_from_rendered_images, save_comparison_image
 from data_geometry.riemannian_optimization.retraction import create_retraction_fn
 from data_geometry.riemannian_optimization import get_riemannian_optimizer
@@ -139,6 +140,46 @@ def linear_timesteps(start_t: int, end_t: int, num_steps: int):
     interval = (end_t - start_t) / (num_steps - 1)
     return sorted({ int(round(start_t + i * interval)) for i in range(num_steps) })
 
+def load_schedule_from_rescaled_entropy(cfg):
+    """
+    Load the rescaled entropic time curve and compute a sampling schedule
+    using the derive_sampling_steps() function.
+
+    Args:
+        cfg (dict): Configuration dict loaded from JSON.
+
+    Returns:
+        np.ndarray: Computed schedule of timesteps for Riemannian optimization.
+    """
+    log_dir = cfg.get("log_dir", "logs")
+    rescaled_time_path = os.path.join(log_dir, "rescaled_entropic_time_curve.npy")
+
+    if not os.path.exists(rescaled_time_path):
+        raise FileNotFoundError(f"Missing rescaled entropic time curve at {rescaled_time_path}")
+
+    # Load saved rescaled entropic time curve
+    res_time = np.load(rescaled_time_path)
+    total_timesteps = len(res_time)
+    ts = np.arange(total_timesteps)
+
+    # Parameters
+    N = cfg.get("multistage_steps", 16)
+    start_t = cfg.get("start_diffusion_timestep", total_timesteps)
+    end_t = int(np.clip(start_t, 0, total_timesteps - 1))
+
+    print(f"Computing rescaled entropy-based schedule from timestep: {end_t}/{total_timesteps-1}")
+
+    # Compute and return the schedule
+    schedule = derive_sampling_steps(
+        cumulative_time_curve=res_time,
+        original_timesteps=ts,
+        num_sampling_steps=N,
+        total_timesteps=total_timesteps,
+        max_timestep=end_t
+    )
+    return schedule
+
+
 def multistage_optimization(config_path):
     cfg = load_riemannian_config(config_path)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -162,19 +203,19 @@ def multistage_optimization(config_path):
 
     # Data & encode
     print("Loading data sample ...")
-    '''
+    
     ds = cls.load_dataset()
     cid = CelebAttrDataset.cls_to_id[ cfg.get("target_attr","Smiling") ]
-    L = cfg.get("num_samples", 5)
+    L = cfg.get("num_samples", 4)
     idx = [i for i,s in enumerate(ds) if s["labels"][cid]==-1][:L]
     batch = torch.stack([ds[i]["img"] for i in idx]).to(device)
-    '''
+    
 
-    data = ImageDataset("imgs_align", image_size=auto_conf.img_size,
-                         exts=["jpg", "JPG", "png"], do_augment=False)
-    L = 5
-    batch = data[0]["img"].unsqueeze(0).repeat(L, 1, 1, 1).to(device)
-    cid = CelebAttrDataset.cls_to_id[ cfg.get("target_attr","Smiling") ]
+    #data = ImageDataset("imgs_align", image_size=auto_conf.img_size,
+    #                     exts=["jpg", "JPG", "png"], do_augment=False)
+    #L = 5
+    #batch = data[0]["img"].unsqueeze(0).repeat(L, 1, 1, 1).to(device)
+    #cid = CelebAttrDataset.cls_to_id[ cfg.get("target_attr","Smiling") ]
     
 
     cond = ae.encode(batch)
@@ -208,7 +249,7 @@ def multistage_optimization(config_path):
 
     # pick N linearly-spaced timesteps from start_t up to final (diff.num_timesteps-1)
     # reverse to get descending order for the denoising loop
-    stages = linear_timesteps(start_t, t_val, num_stages)[::-1]
+    stages = load_schedule_from_rescaled_entropy(cfg) #linear_timesteps(start_t, t_val, num_stages)[::-1]
 
     print(stages)
 
@@ -254,10 +295,24 @@ def multistage_optimization(config_path):
             x = traj[-1]
             trajectory.append(x.clone().detach().cpu())
 
+
+            # Log diagnostic losses (only for analysis)
+            t_tensor = torch.full((1,), t, dtype=torch.float32, device=x.device)
+            classifier_fn = get_classifier_fn(cls, t_tensor, latent_shape)
+            opt_fn_debug = get_opt_fn_debug(
+                classifier_fn, cid, latent_shape, x0_normalized,
+                cfg.get("classifier_weight", 1.),
+                cfg.get("reg_norm_weight", 0.5),
+                cfg.get("reg_norm_type", "L2")
+            )
+            with torch.no_grad():
+                _, cls_loss, reg_loss = opt_fn_debug(x.to(device))
+                print(f"[Stage {i}] Cls Loss: {cls_loss.mean():.4f} | Recon Loss ({cfg.get('reg_norm_type','L2')}): {reg_loss.mean():.4f}")
+
             # 🖥️ Print memory info at the end of stage
-            print(f"[Stage {i}] After Riemannian optimization:")
-            print(f"    Allocated: {torch.cuda.memory_allocated() / 2**20:.2f} MB")
-            print(f"    Reserved: {torch.cuda.memory_reserved() / 2**20:.2f} MB")
+            #print(f"[Stage {i}] After Riemannian optimization:")
+            #print(f"    Allocated: {torch.cuda.memory_allocated() / 2**20:.2f} MB")
+            #print(f"    Reserved: {torch.cuda.memory_reserved() / 2**20:.2f} MB")
 
 
         # explicit reverse jump to next t (unless last stage)

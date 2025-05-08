@@ -3,8 +3,8 @@ CONFIG = {
     "random_seed": 42,
 
     #Multistage parameters
-    "multistage_steps": 16,
-    "start_diffusion_timestep": 16,
+    "multistage_steps": 8,
+    "start_diffusion_timestep": 20,
     "jump_method": 'ddpm',
 
 
@@ -56,6 +56,6 @@ CONFIG = {
     "estimate_cond": False,   # <-- toggle condition‐number estimation
 
     # Logging
-    "log_dir": "ro_optimization/ro_results/optimization",
+    "log_dir": "ro_optimization/ro_results/multistage_optimization",
     "plot_filename": "combined_plot.png",
 }

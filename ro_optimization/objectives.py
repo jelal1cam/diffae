@@ -32,3 +32,28 @@ def get_opt_fn(classifier_fn, cls_id, latent_shape, x0_flat,
         return classifier_weight * cls_loss + reg_norm_weight * reg_loss
 
     return opt_fn
+
+def get_opt_fn_debug(classifier_fn, cls_id, latent_shape, x0_flat,
+                     classifier_weight=1., reg_norm_weight=0.1, reg_norm_type="L2"):
+    """
+    Returns a function for logging: returns (total_loss, cls_loss, reg_loss)
+    """
+    def opt_fn_debug(x_flat):
+        logits = classifier_fn(x_flat)
+        cls_loss = -logits[:, cls_id]
+
+        if reg_norm_weight > 0:
+            if reg_norm_type.upper() == "L2":
+                reg_loss = F.mse_loss(x_flat, x0_flat, reduction='none').sum(dim=1)
+            elif reg_norm_type.upper() == "L1":
+                reg_loss = F.l1_loss(x_flat, x0_flat, reduction='none').sum(dim=1)
+            else:
+                raise ValueError(f"Unknown norm type: {reg_norm_type}. Use 'L2' or 'L1'.")
+        else:
+            reg_loss = x_flat.new_zeros(x_flat.size(0))
+
+        total_loss = classifier_weight * cls_loss + reg_norm_weight * reg_loss
+        return total_loss, cls_loss, reg_loss
+
+    return opt_fn_debug
+

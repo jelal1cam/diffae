@@ -32,6 +32,19 @@ class DiffusionWrapper:
             return sigma_vals[t_idx].view(t.size(0), 1)
         return sigma_fn
 
+    def get_edm_sigma_fn(self):
+        """
+        σ_EDM(t) = σ_std(t) / α(t)
+        where σ_std = sqrt(1 - ᾱ_t) and α = sqrt(ᾱ_t).
+        """
+        alpha_fn = self.get_alpha_fn()
+        sigma_fn = self.get_sigma_fn()
+        def edm_sigma_fn(t):
+            a     = alpha_fn(t)   # shape (B,1)
+            s_std = sigma_fn(t)   # shape (B,1)
+            return (s_std / a)    # shape (B,1)
+        return edm_sigma_fn
+
     def snr(self, t):
         alpha_fn = self.get_alpha_fn()
         sigma_fn = self.get_sigma_fn()
