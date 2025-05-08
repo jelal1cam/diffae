@@ -3,15 +3,16 @@ CONFIG = {
     "random_seed": 42,
 
     #Multistage parameters
-    "multistage_steps": 8,
-    "start_diffusion_timestep": 20,
+    "target_attr": 'Smiling',
+    "multistage_steps": 2,
+    "start_diffusion_timestep": 2,
     "jump_method": 'ddpm',
-
+    "schedule": 'linear',
 
     # Riemannian optimization parameters
     "ro_SNR": 124, #SNR at which Riemannian optimization takes place
     "reg_lambda": 1e-5,
-    "riemannian_steps": 3,
+    "riemannian_steps": 2,
     "riemannian_lr_init": 5e-3, #5e-3,
     
     # Optimizer selection:

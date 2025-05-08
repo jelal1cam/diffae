@@ -5,6 +5,27 @@ from .utils import unflatten_tensor
 import imageio
 import math
 from tqdm import tqdm 
+import torchvision.utils as vutils
+import os 
+
+def save_original_and_final_images(batch, final_imgs, save_dir):
+    """
+    Save the original and final manipulated images as tensors and PNGs.
+    Args:
+        batch (Tensor): Original image batch, (B, 3, H, W), float [0, 1]
+        final_imgs (Tensor): Final image batch, (B, 3, H, W), float [0, 1]
+        save_dir (str): Directory to save to
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    torch.save(batch.cpu(), os.path.join(save_dir, "original_imgs.pt"))
+    torch.save(final_imgs.cpu(), os.path.join(save_dir, "final_imgs.pt"))
+
+    vutils.save_image(batch, os.path.join(save_dir, "original_imgs.png"), nrow=batch.size(0))
+    vutils.save_image(final_imgs, os.path.join(save_dir, "final_imgs.png"), nrow=final_imgs.size(0))
+
+    print(f"[INFO] Saved tensors to: {save_dir}")
+    print(f"[DEBUG] Original image range: min={batch.min().item():.4f}, max={batch.max().item():.4f}")
+    print(f"[DEBUG] Final image range:    min={final_imgs.min().item():.4f}, max={final_imgs.max().item():.4f}")
 
 def render_trajectory_images(
     model,

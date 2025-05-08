@@ -32,11 +32,11 @@ from .diffusion_utils import (
     compute_discrete_time_from_target_snr
 )
 from .objectives import get_opt_fn, get_opt_fn_debug
-from .visualization_utils import render_trajectory_images, visualize_trajectory, save_gif_from_rendered_images, save_comparison_image
+from .visualization_utils import save_original_and_final_images, render_trajectory_images, visualize_trajectory, save_gif_from_rendered_images, save_comparison_image
 from data_geometry.riemannian_optimization.retraction import create_retraction_fn
 from data_geometry.riemannian_optimization import get_riemannian_optimizer
 from templates_latent import ffhq128_autoenc_latent
-from templates_cls import ffhq128_autoenc_non_linear_time_cls_full, ffhq128_autoenc_non_linear_cls
+from templates_cls import ffhq128_autoenc_non_linear_cls, ffhq128_autoenc_non_linear_time_cls_full
 from experiment import LitModel
 from experiment_classifier import ClsModel
 from dataset import CelebAttrDataset, ImageDataset
@@ -205,17 +205,17 @@ def multistage_optimization(config_path):
     print("Loading data sample ...")
     
     ds = cls.load_dataset()
-    cid = CelebAttrDataset.cls_to_id[ cfg.get("target_attr","Smiling") ]
-    L = cfg.get("num_samples", 4)
+    cid = CelebAttrDataset.cls_to_id[ cfg.get("target_attr","Eyeglasses") ]
+    L = cfg.get("num_samples", 5)
     idx = [i for i,s in enumerate(ds) if s["labels"][cid]==-1][:L]
     batch = torch.stack([ds[i]["img"] for i in idx]).to(device)
     
 
     #data = ImageDataset("imgs_align", image_size=auto_conf.img_size,
     #                     exts=["jpg", "JPG", "png"], do_augment=False)
-    #L = 5
+    #L = 2
     #batch = data[0]["img"].unsqueeze(0).repeat(L, 1, 1, 1).to(device)
-    #cid = CelebAttrDataset.cls_to_id[ cfg.get("target_attr","Smiling") ]
+    #cid = CelebAttrDataset.cls_to_id[ cfg.get("target_attr","Eyeglasses") ]
     
 
     cond = ae.encode(batch)
@@ -249,7 +249,7 @@ def multistage_optimization(config_path):
 
     # pick N linearly-spaced timesteps from start_t up to final (diff.num_timesteps-1)
     # reverse to get descending order for the denoising loop
-    stages = load_schedule_from_rescaled_entropy(cfg) #linear_timesteps(start_t, t_val, num_stages)[::-1]
+    stages = load_schedule_from_rescaled_entropy(cfg) if cfg.get("schedule", 'linear') else linear_timesteps(start_t, t_val, num_stages)[::-1]
 
     print(stages)
 
@@ -297,7 +297,7 @@ def multistage_optimization(config_path):
 
 
             # Log diagnostic losses (only for analysis)
-            t_tensor = torch.full((1,), t, dtype=torch.float32, device=x.device)
+            t_tensor = torch.full((1,), t, dtype=torch.float32, device=device)
             classifier_fn = get_classifier_fn(cls, t_tensor, latent_shape)
             opt_fn_debug = get_opt_fn_debug(
                 classifier_fn, cid, latent_shape, x0_normalized,
@@ -334,12 +334,18 @@ def multistage_optimization(config_path):
     T_render, chunk = cfg.get("T_render", 250), cfg.get("chunk", 25)
     xT = encode_xt_in_chunks(ae, batch, cond, T_render, chunk)
 
-    out = cfg.get("log_dir", "logs")
+    out = os.path.join(cfg.get("log_dir", "logs"), cfg.get("target_attr"))
     os.makedirs(out, exist_ok=True)
     imgs = render_trajectory_images(ae, xT, denorm, latent_shape, T_render, fast_mode=True, chunk_size=chunk)
     visualize_trajectory(imgs, os.path.join(out, "traj.png"))
     save_gif_from_rendered_images(imgs, os.path.join(out, "traj.gif"), duration_sec=6)
     save_comparison_image(imgs, os.path.join(out, "comparison.png"))
+
+    #save the images for further evaluation
+    # Convert final images (uint8 HWC) → float CHW in [0, 1]
+    final_tensor = torch.tensor(imgs[-1]).float().div(255).permute(0, 3, 1, 2)
+    denorm_batch = (batch * 0.5) + 0.5 # Denormalize original batch: [-1, 1] → [0, 1]
+    save_original_and_final_images(denorm_batch, final_tensor, out) # Save images and print ranges
 
 if __name__ == "__main__":
     p = ArgumentParser()
