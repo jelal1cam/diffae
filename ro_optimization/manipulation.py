@@ -503,7 +503,7 @@ def main():
     riem_out= ae.render(xT, unflatten_tensor(manipulated_riemannian, latent_shape), T_render)
 
     # --- LPIPS Evaluation ---
-    lpips_model = lpips.LPIPS(net='alex').to(device)
+    lpips_model = lpips.LPIPS(net='vgg').to(device)
     with torch.no_grad():
         lpips_lin  = lpips_model(orig * 2 - 1, lin_out * 2 - 1).squeeze()  # Convert to [-1,1]
         lpips_riem = lpips_model(orig * 2 - 1, riem_out * 2 - 1).squeeze()
@@ -527,7 +527,7 @@ def main():
                 f"{debug_riem['cls'][i].item():9.4f} "
                 f"{debug_riem['reg'][i].item():9.4f}"
             )
-            
+
     # Save comparison plot
     out_dir  = os.path.join(cfg.get("log_dir", "logs"), cfg.get("target_attr"))
     save_path= os.path.join(out_dir, "comparison.png")
