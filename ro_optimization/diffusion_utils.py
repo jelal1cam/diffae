@@ -120,18 +120,18 @@ def compute_discrete_time_from_target_snr(riem_config, autoenc_conf):
     ro_snr = riem_config["ro_SNR"]
     print(f"SNR at which Riemannian optimization takes place: {ro_snr}")
     desired_alpha = ro_snr / (1 + ro_snr)
-    print(f"Desired alpha_cumprod (ro_SNR / (1+ro_SNR)): {desired_alpha:.4f}")
+    #print(f"Desired alpha_cumprod (ro_SNR / (1+ro_SNR)): {desired_alpha:.4f}")
     
     latent_diffusion = autoenc_conf.make_latent_eval_diffusion_conf().make_sampler()
     alphas_cumprod = latent_diffusion.alphas_cumprod  # assumed to be a numpy array
     
-    print("\n--- SNR for first 10 diffusion time steps ---")
-    for t in range(15):
-        alpha = alphas_cumprod[t]
-        sigma_squared = 1.0 - alpha
-        snr = alpha / sigma_squared
-        print(f"Step {t:2d}: alpha_cumprod = {alpha:.6f}, SNR = {snr:.6f}")
-    print("---------------------------------------------\n")
+    #print("\n--- SNR for first 10 diffusion time steps ---")
+    #for t in range(15):
+    #    alpha = alphas_cumprod[t]
+    #    sigma_squared = 1.0 - alpha
+    #    snr = alpha / sigma_squared
+    #    print(f"Step {t:2d}: alpha_cumprod = {alpha:.6f}, SNR = {snr:.6f}")
+    #print("---------------------------------------------\n")
 
     diffs = np.abs(alphas_cumprod - desired_alpha)
     best_t = int(np.argmin(diffs))

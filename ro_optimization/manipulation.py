@@ -34,6 +34,7 @@ from templates_cls import (
 from experiment import LitModel
 from experiment_classifier import ClsModel
 from dataset import CelebAttrDataset
+import lpips
 
 
 def load_shared_resources(config_path, device=None):
@@ -177,28 +178,29 @@ def linear_manipulation(
     # --- apply shift and denormalize ---
     z_lin = cls_lin.denormalize(z0n + s.unsqueeze(1) * w.unsqueeze(0))
 
-    # --- optional debug losses ---
+    debug_outputs = None
     if debug:
         z_lin_norm = cls_lin.normalize(z_lin)
-        # build a small classifier_fn for debug
         cls_fn_debug = lambda z: cls_lin.classifier(z)
         debug_fn = get_opt_fn_debug(
             cls_fn_debug,
             cls_id=cid,
-            latent_shape=latent_shape,                           # unused in debug
-            x0_flat=z0n,                                  # original flattened codes
+            latent_shape=latent_shape,
+            x0_flat=z0n,
             classifier_weight=cfg.get("classifier_weight", 1.0),
             reg_norm_weight=cfg.get("reg_norm_weight", 0.5),
             reg_norm_type=cfg.get("reg_norm_type", "L2"),
             target_logit=median_logit,
         )
-        total_loss, cls_loss, reg_loss = debug_fn(z_lin_norm)
-        print(
-            f"[Linear Edit] CLS loss: {cls_loss.mean().item():.4f}, "
-            f"{cfg.get('reg_norm_type','L2')} loss={reg_loss.mean():.4f}"
-        )
+        with torch.no_grad():
+            total_vals, cls_vals, reg_vals = debug_fn(z_lin_norm)
+        debug_outputs = {
+            "total": total_vals,
+            "cls": cls_vals,
+            "reg": reg_vals,
+        }
 
-    return z_lin
+    return z_lin, debug_outputs
 
 
 def multiple_stage_ro(
@@ -347,77 +349,85 @@ def single_stage_ro(
     debug: bool = False
 ):
     """
-    Single-stage (SNR-based) Riemannian optimization, optionally targeting a median logit,
-    with final diagnostic losses if debug=True.
+    Single-stage Riemannian optimization, returning the best‐per‐sample latent
+    and printing per-sample diagnostics in a neat ASCII table when debug=True.
     """
-    # encode & normalize
+    # 1) Encode & normalize
     cond         = ae.encode(batch).to(device)
     latent_shape = cond.shape[1:]
-    x0_flat      = flatten_tensor(cond)
-    x0n          = cls.normalize(x0_flat)
+    x0_flat = flatten_tensor(cond).clone()
+    x0n     = cls.normalize(x0_flat).clone()
     cfg["initial_point"] = x0n
 
-    # pick timestep from target SNR
-    t_val     = compute_discrete_time_from_target_snr(cfg, ae.conf)
-    t_tensor  = torch.full((1,), t_val, dtype=torch.float32, device=device)
+    # 2) Pick SNR timestep
+    t_val    = compute_discrete_time_from_target_snr(cfg, ae.conf)
+    t_tensor = torch.full((1,), t_val, dtype=torch.float32, device=device)
 
-    # build diffusion, score, and denoiser
-    diff      = ae.conf.make_latent_eval_diffusion_conf().make_sampler()
-    wrap      = DiffusionWrapper(diff)
-    score_fn  = get_score_fn(wrap, ae.ema_model.latent_net, t_tensor, latent_shape)
-    denoiser  = get_denoiser_fn(wrap, ae.ema_model.latent_net, t_tensor, latent_shape)
-
-    # retraction
-    retr_fn   = create_retraction_fn(
+    # 3) Build diffusion + score + denoiser + retraction
+    diff     = ae.conf.make_latent_eval_diffusion_conf().make_sampler()
+    wrap     = DiffusionWrapper(diff)
+    score_fn = get_score_fn(wrap, ae.ema_model.latent_net, t_tensor, latent_shape)
+    denoiser = get_denoiser_fn(wrap, ae.ema_model.latent_net, t_tensor, latent_shape)
+    retr_fn  = create_retraction_fn(
         retraction_type=cfg.get("retraction_operator","identity"),
         denoiser_fn=denoiser
     )
 
-    # classifier objective (at zero noise), with optional target_logit
+    # 4) Build classifier‐based objective
     classifier_fn = get_classifier_fn(cls, torch.zeros_like(t_tensor), latent_shape)
     opt_kwargs = {
-        "classifier_fn": classifier_fn,
-        "cls_id":        cid,
-        "latent_shape":  latent_shape,
-        "x0_flat":       x0n,
+        "classifier_fn":     classifier_fn,
+        "cls_id":            cid,
+        "latent_shape":      latent_shape,
+        "x0_flat":           x0n,
         "classifier_weight": cfg.get("classifier_weight",1.0),
         "reg_norm_weight":   cfg.get("reg_norm_weight",0.5),
         "reg_norm_type":     cfg.get("reg_norm_type","L2"),
     }
     if median_logit is not None:
         opt_kwargs["target_logit"] = median_logit
+    opt_fn = get_opt_fn(**opt_kwargs)
 
-    opt_fn    = get_opt_fn(**opt_kwargs)
+    # 5) Run Riemannian‐GD and get full trajectory + processed f‐values
+    riem_opt, _         = get_riemannian_optimizer(score_fn, opt_fn, cfg, retr_fn), None
+    trajectory, metrics_proc = riem_opt.run()
+    # - `trajectory`: list of T tensors [B, D]
+    # - `metrics_proc["function_values"]`: list of B lists, each length T
 
-    # run the single Riemannian optimizer step
-    riem_opt  = get_riemannian_optimizer(score_fn, opt_fn, cfg, retr_fn)
-    traj, _   = riem_opt.run()
-    z_final   = traj[-1].to(device)
-    z_denorm  = cls.denormalize(z_final)
+    # 6) Stack trajectory → [T, B, D], build [B, T] f‐value tensor
+    traj_stack = torch.stack(trajectory, dim=0).cpu()           # [T, B, D]
+    fvals      = torch.tensor(metrics_proc["function_values"])  # [B, T]
 
+    # 7) Pick best step per sample and extract that latent
+    best_steps   = fvals.argmin(dim=1)      # [B]
+    idx_samples  = torch.arange(best_steps.shape[0])
+    best_latents = traj_stack[best_steps, idx_samples, :].to(device)  # [B, D]
+
+    # 8) Denormalize
+    z_denorm = cls.denormalize(best_latents)
+
+    debug_outputs = None
     if debug:
-        # compute final losses
         opt_dbg = get_opt_fn_debug(
             classifier_fn,
             cls_id=cid,
             latent_shape=latent_shape,
             x0_flat=x0n,
-            classifier_weight=cfg.get("classifier_weight", 1.0),
-            reg_norm_weight=cfg.get("reg_norm_weight", 0.5),
-            reg_norm_type=cfg.get("reg_norm_type", "L2"),
+            classifier_weight=cfg.get("classifier_weight",1.0),
+            reg_norm_weight=cfg.get("reg_norm_weight",0.5),
+            reg_norm_type=cfg.get("reg_norm_type","L2"),
             target_logit=median_logit,
         )
         with torch.no_grad():
-            _, cls_loss, reg_loss = opt_dbg(z_final)
-            snr_val = wrap.snr(t_tensor).mean().item()
-            print(
-                f"[single_stage] t={t_val} | SNR={snr_val:.2f} | "
-                f"Cls loss={cls_loss.mean():.4f} | "
-                f"{cfg.get('reg_norm_type','L2')} loss={reg_loss.mean():.4f}"
-            )
+            total_vals, cls_vals, reg_vals = opt_dbg(best_latents)
+        debug_outputs = {
+            "steps": best_steps.cpu(),
+            "total": total_vals,
+            "cls": cls_vals,
+            "reg": reg_vals,
+        }
 
-    return z_denorm
-
+    return z_denorm, debug_outputs
 
 def save_side_by_side_comparison(original, linear, riemannian, save_path):
     """
@@ -467,13 +477,14 @@ def main():
           f"(non-linear): {median_logit_nl:.4f}")
     
     # Run both manipulation methods
-    manipulated_linear  = linear_manipulation(
+    manipulated_linear, debug_linear  = linear_manipulation(
         ae, cls_lin, batch, median_logit_lin, cfg, cid, debug=True
     )
 
     ro_type = cfg.get("ro_type", "multistage")
     if ro_type == 'single-stage':
-        manipulated_riemannian = single_stage_ro(
+        #median_logit_nl = None
+        manipulated_riemannian, debug_riem = single_stage_ro(
             ae, cls_nl, batch, median_logit_nl, cfg, cid, device, debug=True
         )
     elif ro_type == 'multi-stage':
@@ -491,6 +502,32 @@ def main():
     lin_out = ae.render(xT, unflatten_tensor(manipulated_linear, latent_shape), T_render)
     riem_out= ae.render(xT, unflatten_tensor(manipulated_riemannian, latent_shape), T_render)
 
+    # --- LPIPS Evaluation ---
+    lpips_model = lpips.LPIPS(net='alex').to(device)
+    with torch.no_grad():
+        lpips_lin  = lpips_model(orig * 2 - 1, lin_out * 2 - 1).squeeze()  # Convert to [-1,1]
+        lpips_riem = lpips_model(orig * 2 - 1, riem_out * 2 - 1).squeeze()
+    
+    # --- Print Joint Diagnostics Table ---
+    if debug_linear and debug_riem:
+        B = batch.size(0)
+        print(f"\n{'Idx':>3} {'Step':>5} {'LPIPS_L':>9} {'Cls_L':>9} {'Reg_L':>9} | "
+              f"{'Step':>5} {'LPIPS_R':>9} {'Cls_R':>9} {'Reg_R':>9}")
+        print("-" * 80)
+        for i in range(B):
+            step_r = debug_riem["steps"][i].item() if "steps" in debug_riem else "-"
+            print(
+                f"{i+1:3d} "
+                f"{'-':>5} "
+                f"{lpips_lin[i].item():9.4f} "
+                f"{debug_linear['cls'][i].item():9.4f} "
+                f"{debug_linear['reg'][i].item():9.4f} | "
+                f"{step_r:>5} "
+                f"{lpips_riem[i].item():9.4f} "
+                f"{debug_riem['cls'][i].item():9.4f} "
+                f"{debug_riem['reg'][i].item():9.4f}"
+            )
+            
     # Save comparison plot
     out_dir  = os.path.join(cfg.get("log_dir", "logs"), cfg.get("target_attr"))
     save_path= os.path.join(out_dir, "comparison.png")
