@@ -129,7 +129,7 @@ def multiple_stage_ro(
                 classifier_weight=cfg.get("classifier_weight", 1.0),
                 reg_norm_weight=cfg.get("reg_norm_weight", 0.5),
                 reg_norm_type=cfg.get("reg_norm_type", "L2"),
-                target_logit=median_logit,
+                target_logit=None,
             )
             with torch.no_grad():
                 _, cls_loss, reg_loss = opt_dbg(x.to(device))
@@ -152,6 +152,26 @@ def multiple_stage_ro(
 
     # --- Denormalize and return ---
     z_riem = cls_nl.denormalize(x.to(device))
+
+    debug_outputs = None
     if debug:
-        print(f"[Done] final z_riem head: {z_riem[0, :10].cpu().numpy()}")
-    return z_riem
+        opt_dbg = get_opt_fn_debug(
+            cls_fn,
+            cls_id=cid,
+            latent_shape=latent_shape,
+            x0_flat=x0n,
+            classifier_weight=cfg.get("classifier_weight",1.0),
+            reg_norm_weight=cfg.get("reg_norm_weight",0.5),
+            reg_norm_type=cfg.get("reg_norm_type","L2"),
+            target_logit=None,
+        )
+        with torch.no_grad():
+            total_vals, cls_vals, reg_vals = opt_dbg(z_riem)
+
+        debug_outputs = {
+            "total": total_vals,
+            "cls": cls_vals,
+            "reg": reg_vals,
+        }
+
+    return z_riem, debug_outputs
