@@ -55,7 +55,7 @@ def linear_manipulation(
             classifier_weight=cfg.get("classifier_weight", 1.0),
             reg_norm_weight=cfg.get("reg_norm_weight", 0.5),
             reg_norm_type=cfg.get("reg_norm_type", "L2"),
-            target_logit=median_logit,
+            target_logit=None,
         )
         with torch.no_grad():
             total_vals, cls_vals, reg_vals = debug_fn(z_lin_norm)
