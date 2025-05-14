@@ -38,15 +38,15 @@ import math # Added for calculating chunk sizes if needed
 # -----------------------------------------------------------------------------
 # Local project imports
 # -----------------------------------------------------------------------------
-from .config_loader import load_riemannian_config
-from .utils import flatten_tensor, encode_xt_in_chunks, unflatten_tensor # unflatten_tensor needed for linear interpolation
-from .diffusion_utils import (
+from ..config_loader import load_riemannian_config
+from ..utils import flatten_tensor, encode_xt_in_chunks, unflatten_tensor # unflatten_tensor needed for linear interpolation
+from ..diffusion_utils import (
     DiffusionWrapper,
     get_score_fn,
     get_denoiser_fn,
     compute_discrete_time_from_target_snr,
 )
-from .visualization_utils import (
+from ..visualization_utils import (
     render_trajectory_images,
     visualize_trajectory,
     save_gif_from_rendered_images,

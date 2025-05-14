@@ -21,18 +21,18 @@ import numpy as np
 from argparse import ArgumentParser
 
 # Project imports
-from .entropic_times import derive_sampling_steps
-from .config_loader import load_riemannian_config
-from .utils import flatten_tensor, unflatten_tensor, encode_xt_in_chunks
-from .diffusion_utils import (
+from .entropy_time_rescaling import derive_sampling_steps
+from ..config_loader import load_riemannian_config
+from ..utils import flatten_tensor, unflatten_tensor, encode_xt_in_chunks
+from ..diffusion_utils import (
     DiffusionWrapper,
     get_score_fn,
     get_denoiser_fn,
     get_classifier_fn,
     compute_discrete_time_from_target_snr
 )
-from .objectives import get_opt_fn, get_opt_fn_debug
-from .visualization_utils import save_original_and_final_images, render_trajectory_images, visualize_trajectory, save_gif_from_rendered_images, save_comparison_image
+from ..objectives import get_opt_fn, get_opt_fn_debug
+from ..visualization_utils import save_original_and_final_images, render_trajectory_images, visualize_trajectory, save_gif_from_rendered_images, save_comparison_image
 from data_geometry.riemannian_optimization.retraction import create_retraction_fn
 from data_geometry.riemannian_optimization import get_riemannian_optimizer
 from templates_latent import ffhq128_autoenc_latent

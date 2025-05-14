@@ -14,11 +14,11 @@ from argparse import ArgumentParser
 torch.set_float32_matmul_precision('high')
 
 # Local project imports
-from .config_loader import load_riemannian_config
-from .utils import flatten_tensor, unflatten_tensor
-from .diffusion_utils import DiffusionWrapper, get_classifier_fn, get_score_fn, get_denoiser_fn, compute_discrete_time_from_target_snr
-from .objectives import get_opt_fn
-from .visualization_utils import visualize_trajectory, save_gif_from_rendered_images
+from ..config_loader import load_riemannian_config
+from ..utils import flatten_tensor, unflatten_tensor
+from ..diffusion_utils import DiffusionWrapper, get_classifier_fn, get_score_fn, get_denoiser_fn, compute_discrete_time_from_target_snr
+from ..objectives import get_opt_fn
+from ..visualization_utils import visualize_trajectory, save_gif_from_rendered_images
 
 from templates_latent import ffhq128_autoenc_latent
 from templates_cls import ffhq128_autoenc_non_linear_cls

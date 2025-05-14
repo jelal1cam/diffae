@@ -8,15 +8,15 @@ import os
 # Project imports (assumes this file is run from project root)
 # Make sure these imports correctly point to your project structure
 
-from .config_loader import load_riemannian_config
+from ..config_loader import load_riemannian_config
 # Import your specific autoencoder and classifier template configs
 from templates_latent import ffhq128_autoenc_latent
 from experiment import LitModel
 from templates_cls import ffhq128_autoenc_non_linear_cls
 from experiment_classifier import ClsModel
 # Assuming DiffusionWrapper, flatten_tensor are in diffusion_utils or a local file
-from .diffusion_utils import DiffusionWrapper # adjust import as needed
-from .utils import flatten_tensor # adjust import as needed
+from ..diffusion_utils import DiffusionWrapper # adjust import as needed
+from ..utils import flatten_tensor # adjust import as needed
 # Assuming dataset.py and CelebAttrDataset are accessible
 from dataset import CelebAttrDataset # adjust import as needed
 
