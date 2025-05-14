@@ -70,12 +70,13 @@ def main():
 
     ro_type = cfg.get("ro_type", "multistage")
     if ro_type == 'single-stage':
-        #median_logit_nl = None
+        median_logit_nl = None
         manipulated_riemannian, debug_riem = single_stage_ro(
             ae, cls_nl, batch, median_logit_nl, cfg, cid, device, debug=True
         )
     elif ro_type == 'multi-stage':
-        manipulated_riemannian = multiple_stage_ro(
+        median_logit_nl = None
+        manipulated_riemannian, debug_riem = multiple_stage_ro(
         ae, cls_nl, batch, median_logit_nl, cfg, cid, device, debug=True
     )
 

@@ -3,22 +3,22 @@ CONFIG = {
     "random_seed": 42,
 
     #general parameters
-    "num_samples": 10, #number of negative samples for manipulation.
+    "num_samples": 9, #number of negative samples for manipulation.
     "median_samples": 1000, #num of samples used for calculation of the median logit of the target attribute.
-    "median_batch_size": 64, #batchsize for calculation of median target logit
+    "median_batch_size": 128, #batchsize for calculation of median target logit
     
     #General RO parameters parameters
-    'ro_type': 'single-stage',
-    "target_attr": 'Young',
-    "multistage_steps": 1,
-    "start_diffusion_timestep": 0,
+    'ro_type': 'multi-stage',
+    "target_attr": 'Eyeglasses',
+    "multistage_steps": 16,
+    "start_diffusion_timestep": 15,
     "jump_method": 'ddpm',
     "schedule": 'linear',
 
     # Riemannian optimization parameters
-    "ro_SNR": 124, #SNR at which Riemannian optimization takes place
+    "ro_SNR": 124, #124, #SNR at which Riemannian optimization takes place
     "reg_lambda": 1e-5,
-    "riemannian_steps": 10,
+    "riemannian_steps": 2,
     "riemannian_lr_init": 5e-3, #5e-3,
     
     # Optimizer selection:
@@ -26,7 +26,7 @@ CONFIG = {
 
     # Optimization function
     "classifier_weight": 1.,
-    "reg_norm_weight": 0.23, 
+    "reg_norm_weight": 0.2, 
     "reg_norm_type": "L2",
 
     # Trust-region parameters

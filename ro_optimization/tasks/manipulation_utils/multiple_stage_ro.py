@@ -132,7 +132,7 @@ def multiple_stage_ro(
                 target_logit=None,
             )
             with torch.no_grad():
-                _, cls_loss, reg_loss = opt_dbg(x.to(device))
+                total_loss, cls_loss, reg_loss = opt_dbg(x.to(device))
                 snr = wrap.snr(t_tensor).mean().item()
                 print(
                     f"[Stage {i}] t={t} | SNR={snr:.2f} | "
@@ -140,6 +140,12 @@ def multiple_stage_ro(
                     f"{cfg.get('reg_norm_type','L2')} loss={reg_loss.mean():.4f}"
                 )
 
+                debug_outputs = {
+                    "total": total_loss,
+                    "cls": cls_loss,
+                    "reg": reg_loss,
+                }
+                        
         # optional reverse jump
         if reverse_flag and i < len(stages) - 1:
             next_t = stages[i + 1]
@@ -152,26 +158,5 @@ def multiple_stage_ro(
 
     # --- Denormalize and return ---
     z_riem = cls_nl.denormalize(x.to(device))
-
-    debug_outputs = None
-    if debug:
-        opt_dbg = get_opt_fn_debug(
-            cls_fn,
-            cls_id=cid,
-            latent_shape=latent_shape,
-            x0_flat=x0n,
-            classifier_weight=cfg.get("classifier_weight",1.0),
-            reg_norm_weight=cfg.get("reg_norm_weight",0.5),
-            reg_norm_type=cfg.get("reg_norm_type","L2"),
-            target_logit=None,
-        )
-        with torch.no_grad():
-            total_vals, cls_vals, reg_vals = opt_dbg(z_riem)
-
-        debug_outputs = {
-            "total": total_vals,
-            "cls": cls_vals,
-            "reg": reg_vals,
-        }
-
+    
     return z_riem, debug_outputs
