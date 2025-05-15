@@ -1,7 +1,7 @@
 CONFIG = {
     # Random seed for reproducibility
     "random_seed": 42,
-    "num_samples": 3, #num interpolations
+    "num_samples": 10, #num interpolations
 
     # Riemannian optimization parameters
     "ro_SNR": 30, #SNR at which Riemannian optimization takes place

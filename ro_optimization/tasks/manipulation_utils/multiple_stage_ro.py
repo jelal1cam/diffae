@@ -7,12 +7,10 @@ from ...diffusion_utils import (
     get_denoiser_fn,
     get_classifier_fn,
     compute_discrete_time_from_target_snr,
-
 )
 from ...objectives import get_opt_fn, get_opt_fn_debug
 from data_geometry.riemannian_optimization import get_riemannian_optimizer
 from data_geometry.riemannian_optimization.retraction import create_retraction_fn
-
 from ..multistage_optimization import (
     get_cross_retraction_fn,
     forward_perturb,
@@ -32,8 +30,7 @@ def multiple_stage_ro(
     debug: bool = False
 ):
     """
-    Multi‐stage Riemannian attribute manipulation, now with optional debug printing
-    of per‐stage SNR, classification loss, and regularization loss.
+    Multi‐stage Riemannian attribute manipulation.
 
     Args:
       ae           : autoencoder (LitModel)
@@ -46,8 +43,15 @@ def multiple_stage_ro(
       debug        : bool, if True print diagnostic losses each stage
 
     Returns:
-      z_riem       : Tensor (B, latent_dim), the manipulated flattened code
+      z_riem       : Tensor (B, num_ro_seeds, latent_dim) if multi-seed
+      debug_outputs: diagnostics dictionary (unchanged format)
     """
+    num_ro_seeds = cfg.get("num_ro_seeds", 1)
+    B = batch.size(0)
+
+    if num_ro_seeds > 1:
+        batch = batch.repeat_interleave(num_ro_seeds, dim=0)
+
     # --- Initial encode & normalization ---
     cond         = ae.encode(batch).to(device)
     latent_shape = cond.shape[1:]
@@ -84,21 +88,17 @@ def multiple_stage_ro(
     steps        = cfg.get("riemannian_steps")
     reverse_flag = cfg.get("do_reverse_jump", False)
 
-    # --- Loop over stages ---
     for i, t in enumerate(stages):
-        # forward perturb at first stage
         if i == 0:
             t0 = torch.full((batch.size(0),), t, dtype=torch.float32, device=device)
             x  = forward_perturb(x, t0, alpha_fn, sigma_fn)
             if debug:
                 print(f"[Stage {i}] After forward perturb, x head: {x[0, :10].cpu().numpy()}")
 
-        # prepare t_tensor
         t_tensor = torch.full((1,), t, dtype=torch.float32, device=device)
 
-        # build classifier‐ and score‐based sub‐functions
-        cls_fn    = get_classifier_fn(cls_nl, t_tensor, latent_shape)
-        opt_fn    = get_opt_fn(
+        cls_fn = get_classifier_fn(cls_nl, t_tensor, latent_shape)
+        opt_fn = get_opt_fn(
             cls_fn,
             cls_id=cid,
             latent_shape=latent_shape,
@@ -108,18 +108,24 @@ def multiple_stage_ro(
             reg_norm_type=cfg.get("reg_norm_type", "L2"),
             target_logit=median_logit,
         )
-        score_fn  = get_score_fn(wrap, ae.ema_model.latent_net, t_tensor, latent_shape)
-        retract_fn= retractor(t, t + 1, batch.size(0), device)
+        score_fn = get_score_fn(wrap, ae.ema_model.latent_net, t_tensor, latent_shape)
 
-        # run Riemannian GD 
-        cfg_stage                   = copy.deepcopy(cfg)
-        cfg_stage["initial_point"]  = x.detach().clone().requires_grad_(True).to(device)
-        cfg_stage["riemannian_steps"]= steps
+        if i == len(stages) - 1:
+            denoiser_fn = get_denoiser_fn(wrap, ae.ema_model.latent_net, t_tensor, latent_shape)
+            retract_fn = create_retraction_fn(
+                retraction_type=cfg.get("final_retraction_operator", "identity"),
+                denoiser_fn=denoiser_fn
+            )
+        else:
+            retract_fn = retractor(t, t + 1, batch.size(0), device)
+
+        cfg_stage = copy.deepcopy(cfg)
+        cfg_stage["initial_point"] = x.detach().clone().requires_grad_(True).to(device)
+        cfg_stage["riemannian_steps"] = steps
         riem_opt = get_riemannian_optimizer(score_fn, opt_fn, cfg_stage, retract_fn)
         traj, _  = riem_opt.run()
-        x        = traj[-1]
+        x = traj[-1]
 
-        # diagnostic losses
         if debug:
             opt_dbg = get_opt_fn_debug(
                 cls_fn,
@@ -139,14 +145,13 @@ def multiple_stage_ro(
                     f"Cls loss={cls_loss.mean():.4f} | "
                     f"{cfg.get('reg_norm_type','L2')} loss={reg_loss.mean():.4f}"
                 )
-
                 debug_outputs = {
                     "total": total_loss,
                     "cls": cls_loss,
                     "reg": reg_loss,
+                    "steps": torch.full((batch.size(0),), steps)
                 }
-                        
-        # optional reverse jump
+
         if reverse_flag and i < len(stages) - 1:
             next_t = stages[i + 1]
             x = reverse_jump_explicit(
@@ -156,7 +161,9 @@ def multiple_stage_ro(
             if debug:
                 print(f"[Stage {i}] After reverse jump, x head: {x[0, :10].cpu().numpy()}")
 
-    # --- Denormalize and return ---
     z_riem = cls_nl.denormalize(x.to(device))
-    
+
+    if num_ro_seeds > 1:
+        z_riem = z_riem.view(B, num_ro_seeds, -1)
+
     return z_riem, debug_outputs

@@ -3,43 +3,38 @@ CONFIG = {
     "random_seed": 42,
 
     #general parameters
-    "num_samples": 9, #number of negative samples for manipulation.
-    "median_samples": 1000, #num of samples used for calculation of the median logit of the target attribute.
+    "target_attr": 'Eyeglasses', #Attibute for Manipulation
+    "median_samples": 2000, #num of samples used for calculation of the median logit of the target attribute.
     "median_batch_size": 128, #batchsize for calculation of median target logit
-    
-    #General RO parameters parameters
-    'ro_type': 'multi-stage',
-    "target_attr": 'Eyeglasses',
-    "multistage_steps": 16,
-    "start_diffusion_timestep": 15,
-    "jump_method": 'ddpm',
-    "schedule": 'linear',
 
-    # Riemannian optimization parameters
-    "ro_SNR": 124, #124, #SNR at which Riemannian optimization takes place
-    "reg_lambda": 1e-5,
+    "num_samples": 10, #50, #50, #number of negative samples for manipulation.
+    'ro_type': 'multi-stage', #Riemannian Optimization scheme.
+
+    #Multistage RO parameters
+    'num_ro_seeds': 3,
+    "multistage_steps": 11,
+    "start_diffusion_timestep": 20,
+    "jump_method": 'ddpm',
+    "schedule": 'rescaled_entropy',
+
+    # RO parameters
+    "ro_SNR": 124, #SNR at which Riemannian optimization takes place
+    "reg_lambda": 1e-5, #regularizes the Riemannian metric
     "riemannian_steps": 2,
     "riemannian_lr_init": 5e-3, #5e-3,
     
-    # Optimizer selection:
+    # ROptimizer selection:
     "optimizer_type": "gradient_descent",  # Choices:["gradient_descent", "trust_region"]
 
     # Optimization function
     "classifier_weight": 1.,
-    "reg_norm_weight": 0.2, 
+    "reg_norm_weight": 0.4, 
     "reg_norm_type": "L2",
-
-    # Trust-region parameters
-    "trust_region_delta0": 0.1,
-    "trust_region_eta_success": 0.75,
-    "trust_region_eta_fail": 0.25,
-    "trust_region_gamma_inc": 2.0,
-    "trust_region_gamma_dec": 0.5,
 
     # Line search parameters (used by gradient descent branch)
     "line_search": "strong_wolfe",
-    "wolfe_c1": 1e-4,
-    "wolfe_c2": 0.7,
+    "wolfe_c1": 5e-3,
+    "wolfe_c2": 0.5,
     "max_bracket": 12,
     "max_zoom": 10,
     "max_alpha": 300,

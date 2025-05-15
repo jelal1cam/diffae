@@ -7,6 +7,7 @@ from templates_latent import ffhq128_autoenc_latent
 from templates_cls import (
     ffhq128_autoenc_non_linear_cls,
     ffhq128_autoenc_cls,
+    ffhq128_autoenc_non_linear_time_cls
 )
 from experiment import LitModel
 from experiment_classifier import ClsModel
@@ -51,7 +52,7 @@ def load_shared_resources(config_path, device=None):
     ae.ema_model.eval().to(device)
 
     # --- Nonlinear classifier (Riemannian) ---
-    cls_nl_conf = ffhq128_autoenc_non_linear_cls()
+    cls_nl_conf = ffhq128_autoenc_non_linear_time_cls() #ffhq128_autoenc_non_linear_cls()
     cls_nl = ClsModel(cls_nl_conf).to(device)
     ckpt_nl = torch.load(
         os.path.join("checkpoints", cls_nl_conf.name, "last.ckpt"),
@@ -113,23 +114,66 @@ def compute_median_logit(ae, classifier, cls_id, pos_dataset, cfg, device):
 
     return float(np.median(logits))
 
-def save_side_by_side_comparison(original, linear, riemannian, save_path):
-    """
-    Plot a row of [Original | Linear | Riemannian] images for each sample.
-    """
+def save_side_by_side_comparison(original, linear, riemannian_list, save_path, total_losses=None):
     B = original.size(0)
-    fig, axes = plt.subplots(B, 3, figsize=(9, 3 * B))
+    num_seeds = len(riemannian_list)
+    fig, axes = plt.subplots(B, 2 + num_seeds,
+                             figsize=(3 * (2 + num_seeds), 3 * B))
+
     if B == 1:
-        axes = axes.reshape(1, 3)
+        axes = axes.reshape(1, -1)
+
+    titles = ["Original", "Linear"] + [f"Riemannian {i+1}" for i in range(num_seeds)]
+
+    # find best seed per row
+    best_idx = None
+    if total_losses is not None:
+        tl = total_losses.detach().cpu()
+        if tl.shape == (num_seeds, B):
+            tl = tl.transpose(0, 1)
+        assert tl.shape == (B, num_seeds)
+        best_idx = torch.argmin(tl, dim=1)
 
     for i in range(B):
-        for j, img in enumerate((original, linear, riemannian)):
+        for j in range(2 + num_seeds):
             ax = axes[i, j]
-            im = img[i].clamp(0, 1).permute(1, 2, 0).cpu().numpy()
+
+            # select image
+            if j == 0:
+                img = original[i]
+            elif j == 1:
+                img = linear[i]
+            else:
+                img = riemannian_list[j - 2][i]
+
+            # convert to HWC numpy float in [0,1]
+            if isinstance(img, np.ndarray):
+                im = img
+                # if it’s uint8 [0..255], normalize
+                if im.dtype == np.uint8:
+                    im = im.astype(np.float32) / 255.0
+            else:
+                # torch Tensor CHW float [0,1]
+                im = img.clamp(0, 1).permute(1, 2, 0).cpu().numpy()
+
             ax.imshow(im)
-            ax.axis('off')
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            # hide spines
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
+            # set title on first row
             if i == 0:
-                ax.set_title(["Original", "Linear", "Riemannian"][j])
+                ax.set_title(titles[j])
+
+            # highlight best
+            if best_idx is not None and j >= 2 and j == best_idx[i].item() + 2:
+                for spine in ax.spines.values():
+                    spine.set_visible(True)
+                    spine.set_edgecolor('red')
+                    spine.set_linewidth(6)
 
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
