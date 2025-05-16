@@ -59,10 +59,6 @@ def multiple_stage_ro(
     x0n          = cls_nl.normalize(x0)
     x            = x0n.clone()
 
-    if debug:
-        print(f"[Init] batch size={batch.size(0)}, latent dim={x0.shape[1]}")
-        print(f"[Init] x0 head (first 10 dims): {x0[0, :10].cpu().numpy()}")
-
     # --- Diffusion sampler & wrapper ---
     diff      = ae.conf.make_latent_eval_diffusion_conf().make_sampler()
     wrap      = DiffusionWrapper(diff)
@@ -82,7 +78,6 @@ def multiple_stage_ro(
         stages = linear_timesteps(start_t, t_val, num_stages)[::-1]
 
     if debug:
-        print(f"[Schedule] t_val={t_val}")
         print(f"[Schedule] stages={stages}")
 
     steps        = cfg.get("riemannian_steps")
@@ -92,8 +87,6 @@ def multiple_stage_ro(
         if i == 0:
             t0 = torch.full((batch.size(0),), t, dtype=torch.float32, device=device)
             x  = forward_perturb(x, t0, alpha_fn, sigma_fn)
-            if debug:
-                print(f"[Stage {i}] After forward perturb, x head: {x[0, :10].cpu().numpy()}")
 
         t_tensor = torch.full((1,), t, dtype=torch.float32, device=device)
 
@@ -158,8 +151,6 @@ def multiple_stage_ro(
                 x, t, next_t, alpha_fn, sigma_fn,
                 ae.ema_model.latent_net, latent_shape
             )
-            if debug:
-                print(f"[Stage {i}] After reverse jump, x head: {x[0, :10].cpu().numpy()}")
 
     z_riem = cls_nl.denormalize(x.to(device))
 

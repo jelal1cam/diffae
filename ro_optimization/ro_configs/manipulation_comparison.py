@@ -1,13 +1,14 @@
 CONFIG = {
     # Random seed for reproducibility
     "random_seed": 42,
+    "verbose": True,
 
     #general parameters
-    "target_attr": 'Eyeglasses', #Attibute for Manipulation
+    "target_attr": 'Smiling', #Attibute for Manipulation
     "median_samples": 2000, #num of samples used for calculation of the median logit of the target attribute.
     "median_batch_size": 128, #batchsize for calculation of median target logit
 
-    "num_samples": 10, #50, #50, #number of negative samples for manipulation.
+    "num_samples": 30, #50, #number of negative samples for manipulation.
     'ro_type': 'multi-stage', #Riemannian Optimization scheme.
 
     #Multistage RO parameters
@@ -21,21 +22,21 @@ CONFIG = {
     "ro_SNR": 124, #SNR at which Riemannian optimization takes place
     "reg_lambda": 1e-5, #regularizes the Riemannian metric
     "riemannian_steps": 2,
-    "riemannian_lr_init": 5e-3, #5e-3,
+    "riemannian_lr_init": 1e-2, #5e-3,
     
     # ROptimizer selection:
     "optimizer_type": "gradient_descent",  # Choices:["gradient_descent", "trust_region"]
 
     # Optimization function
     "classifier_weight": 1.,
-    "reg_norm_weight": 0.4, 
+    "reg_norm_weight": 0.8, #['Eyeglasses':0.45, 'Similing':0.8]
     "reg_norm_type": "L2",
 
     # Line search parameters (used by gradient descent branch)
     "line_search": "strong_wolfe",
     "wolfe_c1": 5e-3,
-    "wolfe_c2": 0.5,
-    "max_bracket": 12,
+    "wolfe_c2": 0.45,
+    "max_bracket": 13,
     "max_zoom": 10,
     "max_alpha": 300,
     "armijo_rho": 1e-6,
@@ -52,7 +53,7 @@ CONFIG = {
     "cg_preconditioner": 'diagonal',
     "cg_precond_diag_samples": 10, 
     "cg_tol": 1e-6, 
-    "cg_max_iter": 15, #20
+    "cg_max_iter": 13, #20
 
     #Settings for computing the conditioning number of the metric
     "estimate_cond": False,   # <-- toggle condition‐number estimation

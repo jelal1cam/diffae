@@ -1,4 +1,5 @@
 import os
+import random
 import time
 import torch
 import pandas as pd
@@ -7,37 +8,8 @@ from itertools import product
 from argparse import ArgumentParser
 
 # ==== Utilities imports from your project ====
-from .utils import load_shared_resources, compute_median_logit, save_side_by_side_comparison
-from ..utils import flatten_tensor, unflatten_tensor, encode_xt_in_chunks
-from ..diffusion_utils import (
-    DiffusionWrapper,
-    get_score_fn,
-    get_denoiser_fn,
-    get_classifier_fn,
-    compute_discrete_time_from_target_snr,
-)
-from data_geometry.riemannian_optimization import get_riemannian_optimizer
-from data_geometry.riemannian_optimization.retraction import create_retraction_fn
-from ..objectives import get_opt_fn, get_opt_fn_debug
-from .multistage_optimization import (
-    get_cross_retraction_fn,
-    forward_perturb,
-    reverse_jump_explicit,
-    load_schedule_from_rescaled_entropy,
-    linear_timesteps,
-)
-from ..config_loader import load_riemannian_config
-from templates_latent import ffhq128_autoenc_latent
-from templates_cls import (
-    ffhq128_autoenc_non_linear_cls,
-    ffhq128_autoenc_cls,
-)
-from experiment import LitModel
-from experiment_classifier import ClsModel
-from dataset import CelebAttrDataset
-import lpips
-
-from .manipulation_utils import linear_manipulation, multiple_stage_ro, single_stage_ro
+from .utils import load_shared_resources, compute_median_logit
+from .manipulation_utils import multiple_stage_ro
 
 
 def load_or_compute_median_logits(ae, cls_lin, cls_nl, pos_dataset, cfg, cid, device):
@@ -57,18 +29,15 @@ def load_or_compute_median_logits(ae, cls_lin, cls_nl, pos_dataset, cfg, cid, de
     return lin, nl
 
 
-def evaluate_single_run(ae, cls_lin, cls_nl, batch, cfg, cid, device, grid_keys):
-    lin_med, nl_med = load_or_compute_median_logits(
-        ae, cls_lin, cls_nl, None, cfg, cid, device
-    )
-
+def evaluate_single_run(ae, cls_lin, cls_nl, batch, nl_med, cfg, cid, device, grid_keys):
     _, debug_riem = multiple_stage_ro(
         ae, cls_nl, batch, nl_med, cfg, cid, device, debug=True
     )
 
     cls_loss = debug_riem['cls'].mean().item()
     reg_loss = debug_riem['reg'].mean().item()
-    total_loss = cls_loss + reg_loss
+    total_loss = debug_riem['total'].mean().item()
+
 
     # Include all swept parameters
     result = {k: cfg[k] for k in grid_keys}
@@ -83,29 +52,38 @@ def evaluate_single_run(ae, cls_lin, cls_nl, batch, cfg, cid, device, grid_keys)
 def run_sweep(cfg_yaml, grid_params):
     ae, cls_nl, cls_lin, dataset, pos_dataset, neg_indices, base_cfg, cid, device = \
         load_shared_resources(cfg_yaml)
+    
+    _, nl_med = load_or_compute_median_logits(
+        ae, cls_lin, cls_nl, None, base_cfg, cid, device
+    )
 
     idxs = neg_indices[: base_cfg['num_samples']]
     batch = torch.stack([dataset[i]['img'] for i in idxs]).to(device)
 
     grid = list(product(*grid_params.values()))
     total = len(grid)
+    random.shuffle(grid)  # shuffle configs to get better ETA
     print(f"Starting sweep of {total} runs...")
 
-    start_time = time.time()
+    times = []
     rows = []
     grid_keys = list(grid_params.keys())
+
     for i, vals in enumerate(grid, 1):
+        start = time.time()
+
         cfg = base_cfg.copy()
         cfg.update(dict(zip(grid_keys, vals)))
 
         swept_cfg = {k: cfg[k] for k in grid_keys}
         print(f"Run {i}/{total} - Swept config: {swept_cfg}")
 
-        result = evaluate_single_run(ae, cls_lin, cls_nl, batch, cfg, cid, device, grid_keys)
+        result = evaluate_single_run(ae, cls_lin, cls_nl, batch, nl_med, cfg, cid, device, grid_keys)
         rows.append(result)
 
-        elapsed = time.time() - start_time
-        eta = elapsed / i * (total - i)
+        times.append(time.time() - start)
+        avg_time = sum(times) / len(times)
+        eta = avg_time * (total - i)
         m, s = divmod(int(eta), 60)
         print(f"ETA for remaining runs: {m}m{s:02d}s")
 
@@ -125,14 +103,17 @@ def main():
     args = parser.parse_args()
 
     grid_params = {
-        'multistage_steps': [11, 16],  # [6, 11, 16]
-        'start_diffusion_timestep': [20, 30],  # [10, 20, 30]  
-        'riemannian_steps': [2, 3],  # [1, 2, 3]
-        'reg_norm_weight': [0.35, 0.4],  # [0.3, 0.35, 0.4]
-        'wolfe_c1': [1e-4, 5e-3, 1e-3],  # [1e-4, 1e-3]
-        'wolfe_c2': [0.5, 0.6, 0.7, 0.8],
+        'multistage_steps': [11],  # [6, 11, 16]
+        'start_diffusion_timestep': [20],  # [10, 20, 30]  
+        'riemannian_steps': [2],  # [1, 2, 3]
+        'reg_norm_weight': [0.4],  # [0.3, 0.35, 0.4]
+        'wolfe_c1': [5e-3],  # [1e-4, 1e-3]
+        'wolfe_c2': [0.4, 0.5],
         'cg_precond_diag_samples': [10],
-        'cg_max_iter': [15]
+        'cg_max_iter':[13, 15, 17],
+        'reg_lambda':[1e-5, 1e-6],
+        'max_bracket':[12, 13],
+        'riemannian_lr_init': [2.5e-3, 5e-3, 1e-2]
     }
 
     run_sweep(args.ro_config, grid_params)

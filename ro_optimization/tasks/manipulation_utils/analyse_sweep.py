@@ -37,7 +37,7 @@ def main():
     )
     parser.add_argument(
         '--top_k', type=int, default=None,
-        help='If set, only print the top_k Pareto configs sorted by total of metrics.'
+        help='If set, only print the top_k Pareto configs sorted by the first metric.'
     )
     parser.add_argument(
         '--out_dir', default=None,
@@ -52,35 +52,26 @@ def main():
     if args.metrics:
         metrics = [m.strip() for m in args.metrics.split(',')]
     else:
-        # auto-detect metrics by suffix
         metrics = [c for c in df.columns if c.endswith('_loss') or c.endswith('_err')]
     if not metrics:
         raise ValueError("No metric columns found. Please specify with --metrics.")
-
-    # Compute a total_loss if multiple metrics exist
-    if len(metrics) > 1 and 'total_loss' not in df.columns:
-        df['total_loss'] = df[metrics].sum(axis=1)
-        metrics_with_total = metrics + ['total_loss']
-    else:
-        metrics_with_total = metrics
 
     # Identify Pareto-optimal rows
     mask = compute_pareto_front(df, metrics)
     pareto_df = df[mask].copy()
 
-    # Sort Pareto configs by sum-of-metrics (total_loss) if present, else by first metric
-    if 'total_loss' in pareto_df.columns:
+    # Sort Pareto configs by the total loss.
+    if 'total_loss' in metrics:
         pareto_df = pareto_df.sort_values('total_loss')
     else:
         pareto_df = pareto_df.sort_values(metrics[0])
 
-    # Identify hyperparameter columns as those not metrics nor others
-    non_hp = set(metrics_with_total + ['total_loss'])
-    hp_cols = [c for c in df.columns if c not in non_hp]
+    # Identify hyperparameter columns as those not in metrics
+    hp_cols = [c for c in df.columns if c not in metrics]
 
     # Print summary
     print(f"Found {len(pareto_df)} Pareto-optimal configurations out of {len(df)} total.")
-    display_cols = hp_cols + metrics_with_total
+    display_cols = hp_cols + metrics
     if args.top_k:
         print(pareto_df[display_cols].head(args.top_k).to_string(index=False))
     else:
@@ -92,6 +83,7 @@ def main():
         out_path = os.path.join(args.out_dir, 'pareto_configs.csv')
         pareto_df.to_csv(out_path, index=False)
         print(f"Pareto configurations saved to {out_path}")
+
 
 if __name__ == '__main__':
     main()

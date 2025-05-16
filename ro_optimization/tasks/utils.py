@@ -15,7 +15,6 @@ from dataset import CelebAttrDataset
 from ..config_loader import load_riemannian_config
 from ..utils import flatten_tensor
 
-
 def load_shared_resources(config_path, device=None):
     """
     Load models, dataset, and configuration.
