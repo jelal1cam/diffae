@@ -1,7 +1,7 @@
 CONFIG = {
     # Random seed for reproducibility
     "random_seed": 42,
-    "verbose": True,
+    "verbose": False,
 
     #general parameters
     "target_attr": 'Smiling', #Attibute for Manipulation
