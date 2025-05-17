@@ -116,7 +116,7 @@ def main():
         'multistage_steps': [11],
         'start_diffusion_timestep': [20],
         'riemannian_steps': [2],
-        'reg_norm_weight': [0.5, 0.6, 0.7, 0.8],
+        'reg_norm_weight': [0.6, 0.7, 0.8, 0.85, 0.9, 1.],
         'wolfe_c1': [5e-3],
         'wolfe_c2': [0.45],
         'cg_precond_diag_samples': [10],
