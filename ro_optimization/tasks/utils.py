@@ -52,8 +52,8 @@ def load_shared_resources(config_path, device=None):
     ae.ema_model.eval().to(device)
 
     # --- Nonlinear classifier (Riemannian) ---
-    cls_nl_conf = ffhq128_autoenc_flexibleclassifier_time_cls() #ffhq128_autoenc_non_linear_cls()
-    cls_nl = ClsModel(cls_nl_conf).to(device)
+    cls_nl_conf = ffhq128_autoenc_flexibleclassifier_time_cls_tuned() #ffhq128_autoenc_non_linear_cls()
+    cls_nl = RefactoredClsModel(cls_nl_conf).to(device)
     checkpoint_path = getattr(cls_nl_conf, 'checkpoint_path', None) or os.path.join("checkpoints", cls_nl_conf.name, "best.ckpt")
     ckpt_nl = torch.load(checkpoint_path, map_location="cpu")
     cls_nl.load_state_dict(ckpt_nl["state_dict"], strict=False)

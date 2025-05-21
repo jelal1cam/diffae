@@ -106,14 +106,14 @@ def main():
         'multistage_steps': [11],  # [6, 11, 16]
         'start_diffusion_timestep': [20],  # [10, 20, 30]  
         'riemannian_steps': [2],  # [1, 2, 3]
-        'reg_norm_weight': [0.4],  # [0.3, 0.35, 0.4]
+        'reg_norm_weight': [0.9, 1.1],  # [0.3, 0.35, 0.4]
         'wolfe_c1': [5e-3],  # [1e-4, 1e-3]
-        'wolfe_c2': [0.4, 0.5],
+        'wolfe_c2': [0.3, 0.4, 0.45, 0.5, 0.6],
         'cg_precond_diag_samples': [10],
-        'cg_max_iter':[13, 15, 17],
-        'reg_lambda':[1e-5, 1e-6],
-        'max_bracket':[12, 13],
-        'riemannian_lr_init': [2.5e-3, 5e-3, 1e-2]
+        'cg_max_iter':[13],
+        'reg_lambda':[1e-5],
+        'max_bracket':[13],
+        'riemannian_lr_init': [1e-2]
     }
 
     run_sweep(args.ro_config, grid_params)
