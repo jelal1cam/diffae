@@ -7,35 +7,8 @@ from argparse import ArgumentParser
 
 # Utilities
 from .utils import load_shared_resources, compute_median_logit, save_side_by_side_comparison
-from ..utils import flatten_tensor, unflatten_tensor, encode_xt_in_chunks
-from ..diffusion_utils import (
-    DiffusionWrapper,
-    get_score_fn,
-    get_denoiser_fn,
-    get_classifier_fn,
-    compute_discrete_time_from_target_snr,
-)
-from data_geometry.riemannian_optimization import get_riemannian_optimizer
-from data_geometry.riemannian_optimization.retraction import create_retraction_fn
-from ..objectives import get_opt_fn, get_opt_fn_debug
-from .multistage_optimization import (
-    get_cross_retraction_fn,
-    forward_perturb,
-    reverse_jump_explicit,
-    load_schedule_from_rescaled_entropy,
-    linear_timesteps
-)
-from ..config_loader import load_riemannian_config
-from templates_latent import ffhq128_autoenc_latent
-from templates_cls import (
-    ffhq128_autoenc_non_linear_cls,
-    ffhq128_autoenc_cls,
-)
-from experiment import LitModel
-from experiment_classifier import ClsModel
-from dataset import CelebAttrDataset
+from ..utils import unflatten_tensor, encode_xt_in_chunks
 import lpips
-
 from .manipulation_utils import linear_manipulation, multiple_stage_ro, single_stage_ro
 
 

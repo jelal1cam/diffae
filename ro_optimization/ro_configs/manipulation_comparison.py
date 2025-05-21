@@ -29,7 +29,7 @@ CONFIG = {
 
     # Optimization function
     "classifier_weight": 1.,
-    "reg_norm_weight": 0.9, #['Eyeglasses':0.45, 'Similing':0.8]
+    "reg_norm_weight": 0.9, #['Eyeglasses':0.45, 'Similing':0.8, 'male':0.9]
     "reg_norm_type": "L2",
 
     # Line search parameters (used by gradient descent branch)

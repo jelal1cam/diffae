@@ -5,12 +5,13 @@ import matplotlib.pyplot as plt
 
 from templates_latent import ffhq128_autoenc_latent
 from templates_cls import (
-    ffhq128_autoenc_non_linear_cls,
+    ffhq128_autoenc_flexibleclassifier_time_cls,
+    ffhq128_autoenc_flexibleclassifier_time_cls_tuned,
     ffhq128_autoenc_cls,
-    ffhq128_autoenc_non_linear_time_cls
 )
 from experiment import LitModel
 from experiment_classifier import ClsModel
+from experiment_classifier_new import ClsModel as RefactoredClsModel
 from dataset import CelebAttrDataset
 from ..config_loader import load_riemannian_config
 from ..utils import flatten_tensor
@@ -51,12 +52,10 @@ def load_shared_resources(config_path, device=None):
     ae.ema_model.eval().to(device)
 
     # --- Nonlinear classifier (Riemannian) ---
-    cls_nl_conf = ffhq128_autoenc_non_linear_time_cls() #ffhq128_autoenc_non_linear_cls()
+    cls_nl_conf = ffhq128_autoenc_flexibleclassifier_time_cls() #ffhq128_autoenc_non_linear_cls()
     cls_nl = ClsModel(cls_nl_conf).to(device)
-    ckpt_nl = torch.load(
-        os.path.join("checkpoints", cls_nl_conf.name, "last.ckpt"),
-        map_location="cpu"
-    )
+    checkpoint_path = getattr(cls_nl_conf, 'checkpoint_path', None) or os.path.join("checkpoints", cls_nl_conf.name, "best.ckpt")
+    ckpt_nl = torch.load(checkpoint_path, map_location="cpu")
     cls_nl.load_state_dict(ckpt_nl["state_dict"], strict=False)
     cls_nl.eval()
 

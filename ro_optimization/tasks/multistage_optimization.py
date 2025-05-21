@@ -36,7 +36,7 @@ from ..visualization_utils import save_original_and_final_images, render_traject
 from data_geometry.riemannian_optimization.retraction import create_retraction_fn
 from data_geometry.riemannian_optimization import get_riemannian_optimizer
 from templates_latent import ffhq128_autoenc_latent
-from templates_cls import ffhq128_autoenc_non_linear_cls, ffhq128_autoenc_non_linear_time_cls_full
+from templates_cls import ffhq128_autoenc_non_linear_cls
 from experiment import LitModel
 from experiment_classifier import ClsModel
 from dataset import CelebAttrDataset, ImageDataset

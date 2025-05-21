@@ -56,15 +56,38 @@ def ffhq128_autoenc_non_linear_time_cls():
     conf.lower_trainable_snr = 1
     return conf
 
-def ffhq128_autoenc_non_linear_time_cls_full():
+#-------------------------------#
+#------- new classifiers -------#
+
+def ffhq128_autoenc_flexibleclassifier_time_cls():
     conf = ffhq128_autoenc_non_linear_cls()
     #conf.autoenc_config.T_eval = 1000
     conf.autoenc_config.latent_T_eval = 1000
-    conf.name = 'ffhq128_autoenc_time_cls_nonlinear_full'
+    conf.name = 'ffhq128_autoenc_time_cls_flexibleclassifier'
     conf.diffusion_time_dependent_classifier = True
-    conf.lower_trainable_snr = 1e-2
+    conf.lower_trainable_snr = 1
     return conf
 
+def ffhq128_autoenc_flexibleclassifier_time_cls_tuned():
+    conf = ffhq128_autoenc_non_linear_cls()
+    #conf.autoenc_config.T_eval = 1000
+    conf.autoenc_config.latent_T_eval = 1000
+    conf.name = 'ffhq128_autoenc_time_cls_flexibleclassifier_tuned'
+    conf.diffusion_time_dependent_classifier = True
+    conf.lower_trainable_snr = 1
+
+    conf.classifier_type = 'flexible'
+    conf.time_embedding_dim = 64
+    conf.non_linear_hidden_dims = [512, 256]
+    conf.non_linear_dropout = 0.3
+    conf.optimizer = OptimizerType.adamw
+    conf.weight_decay = 1e-6
+    conf.lr=5e-4
+    
+    conf.checkpoint_path = '/home/gb511/diffae/checkpoints/classifier_grid_search/gs_run05_flexible_lr0.0005_wd1e-06_drop0.3_hd512-256_t64/best-epoch=61-val_loss_ema=0.2297.ckpt'
+    return conf
+
+#----------------- FFHQ 256 ---------------------------
 
 def ffhq256_autoenc_cls():
     '''We first train the encoder on FFHQ dataset then use it as a pretrained to train a linear classifer on CelebA dataset with attribute labels'''
