@@ -8,7 +8,7 @@ CONFIG = {
     "median_samples": 2000, #num of samples used for calculation of the median logit of the target attribute.
     "median_batch_size": 128, #batchsize for calculation of median target logit
 
-    "num_samples": 200, #50, #number of negative samples for manipulation.
+    "num_samples": 10, #50, #number of negative samples for manipulation.
     'ro_type': 'multi-stage', #Riemannian Optimization scheme.
 
     #Multistage RO parameters
@@ -29,7 +29,7 @@ CONFIG = {
 
     # Optimization function
     "classifier_weight": 1.,
-    "reg_norm_weight": 1.1, #['Eyeglasses':0.45, 'Similing':0.8, 'male':0.9]
+    "reg_norm_weight": 1., #['Eyeglasses':0.45, 'Similing':0.8, 'male':0.9]
     "reg_norm_type": "L2",
 
     # Line search parameters (used by gradient descent branch)

@@ -11,6 +11,98 @@ from ..utils import unflatten_tensor, encode_xt_in_chunks
 import lpips
 from .manipulation_utils import linear_manipulation, multiple_stage_ro, single_stage_ro
 
+def save_manipulation_images(orig, lin_out, riem_out_tensors, out_dir, B, S, debug_riem=None):
+    """
+    Save all manipulation images (original, linear, Riemannian) for later evaluation.
+    
+    Args:
+        orig: Tensor of original images (B, C, H, W)
+        lin_out: Tensor of linear edited images (B, C, H, W)
+        riem_out_tensors: List of tensors containing Riemannian edited images
+                          Each tensor has shape (B, C, H, W)
+        out_dir: Directory to save the images
+        B: Batch size
+        S: Number of Riemannian seeds
+        debug_riem: Dictionary with debugging info (optional)
+    """
+    # Create images directory structure
+    images_dir = os.path.join(out_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
+    
+    riem_dir = os.path.join(images_dir, "riemannian")
+    os.makedirs(riem_dir, exist_ok=True)
+    
+    # 1. Save original images
+    orig_path = os.path.join(out_dir, "original_imgs.pt")
+    torch.save(orig, orig_path)
+    print(f"[INFO] Saved original images to {orig_path}")
+    
+    # Also save to images directory for consistency
+    torch.save(orig, os.path.join(images_dir, "original_imgs.pt"))
+    
+    # 2. Save linear edited images
+    lin_path = os.path.join(out_dir, "linear_imgs.pt")
+    torch.save(lin_out, lin_path)
+    print(f"[INFO] Saved linear edited images to {lin_path}")
+    
+    # Also save to images directory
+    torch.save(lin_out, os.path.join(images_dir, "linear_imgs.pt"))
+    
+    # 3. Save Riemannian edited images
+    if S > 1:
+        # Stack all seeds along dimension 1
+        riem_tensor = torch.stack(riem_out_tensors, dim=1)  # Shape: (B, S, C, H, W)
+        riem_path = os.path.join(out_dir, "riemannian_imgs.pt")
+        torch.save(riem_tensor, riem_path)
+        print(f"[INFO] Saved all {S} Riemannian edited image seeds to {riem_path}")
+        
+        # Also save to images directory
+        torch.save(riem_tensor, os.path.join(images_dir, "riemannian_imgs.pt"))
+        
+        # Save each seed separately
+        for i in range(S):
+            seed_path = os.path.join(riem_dir, f"seed_{i}.pt")
+            torch.save(riem_out_tensors[i], seed_path)
+            print(f"[INFO] Saved Riemannian seed {i} to {seed_path}")
+        
+        # Save the best seed per image based on total loss
+        if debug_riem is not None and "total" in debug_riem:
+            total_losses = debug_riem["total"].view(B, S)
+            best_indices = total_losses.argmin(dim=1)
+            best_riem_images = torch.stack([
+                riem_out_tensors[best_indices[i].item()][i] 
+                for i in range(B)
+            ])
+            best_path = os.path.join(out_dir, "riemannian_best_imgs.pt")
+            torch.save(best_riem_images, best_path)
+            print(f"[INFO] Saved best Riemannian edited images to {best_path}")
+            
+            # Also save to images directory
+            torch.save(best_riem_images, os.path.join(images_dir, "riemannian_best_imgs.pt"))
+            
+            # Save metadata about which seed was best for each image
+            best_seeds_info = {
+                "best_indices": best_indices.cpu().numpy(),
+                "total_losses": total_losses.detach().cpu().numpy()
+            }
+            best_seeds_path = os.path.join(riem_dir, "best_seeds_info.npy")
+            np.save(best_seeds_path, best_seeds_info)
+            print(f"[INFO] Saved best seeds info to {best_seeds_path}")
+    else:
+        # Single-seed case - just save the single tensor
+        riem_path = os.path.join(out_dir, "riemannian_imgs.pt")
+        torch.save(riem_out_tensors[0], riem_path)
+        print(f"[INFO] Saved Riemannian edited images to {riem_path}")
+        
+        # Also save to images directory
+        torch.save(riem_out_tensors[0], os.path.join(images_dir, "riemannian_imgs.pt"))
+        
+        # Also save to the seed subdirectory for consistency
+        seed_path = os.path.join(riem_dir, "seed_0.pt") 
+        torch.save(riem_out_tensors[0], seed_path)
+    
+    print(f"[INFO] All manipulation images saved to {images_dir}")
+
 
 def main():
     parser = ArgumentParser()
@@ -201,6 +293,9 @@ def main():
                     f"{lpips_min:12.4f} {cls_min:12.4f} {reg_min:12.4f}"
                 )
 
+
+    #save the images
+    save_manipulation_images(orig, lin_out, riem_out_tensors, out_dir, B, S, debug_riem)
 
     # Save visualization
     comparison_path = os.path.join(out_dir, "comparison.png")

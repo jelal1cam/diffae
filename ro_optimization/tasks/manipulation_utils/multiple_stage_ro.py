@@ -153,8 +153,5 @@ def multiple_stage_ro(
             )
 
     z_riem = cls_nl.denormalize(x.to(device))
-
-    if num_ro_seeds > 1:
-        z_riem = z_riem.view(B, num_ro_seeds, -1)
-
+    z_riem = z_riem.view(B, num_ro_seeds, -1)
     return z_riem, debug_outputs
