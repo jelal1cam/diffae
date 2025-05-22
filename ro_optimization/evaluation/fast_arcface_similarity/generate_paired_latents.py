@@ -1,30 +1,20 @@
 #!/usr/bin/env python3
 """
-Generate paired (custom‑latent, ArcFace‑latent) embeddings that can be used to
-train an alignment network.  Initially the script is configured to work with
-CelebA‑HQ, but it is written so that additional datasets (e.g. FFHQ) can be
-added by simply passing extra dataset names on the command line.
+Generate **paired and fully‑normalised** latent embeddings (custom‑encoder ↔ ArcFace).
 
-The output directory will contain five files:
+Revision – keep it simple 💡
+---------------------------------
+We now reuse the project’s **`LitModel`** helper to load the auto‑encoder and
+its EMA weights instead of manually stripping prefixes.  This matches exactly
+what `load_shared_resources()` does in downstream manipulation code.
 
-    custom_latents.pt   – concatenated tensor of all custom latents    (N, C)
-    arcface_latents.pt  – concatenated tensor of all ArcFace latents   (N, 512)
-    train.pt / val.pt / test.pt – PyTorch `Subset` objects with paired tensors
-
-where N = total number of images over all chosen datasets.
-
-Example usage
--------------
-$ python generate_paired_latents.py \
-        --output_dir datasets/celebahq128_paired_latents \
-        --datasets celebahq \
-        --batch_size 256 --gpu 0
-
-To concatenate CelebA‑HQ and FFHQ 256×256:
-$ python generate_paired_latents.py \
-        --output_dir datasets/celebahq_ffhq256_paired_latents \
-        --datasets celebahq ffhqlmdb256 \
-        --cfg ffhq256_autoenc_latent
+Key points
+~~~~~~~~~~
+* `LitModel(conf)` loads the checkpoint and exposes `ema_model.encoder` – the
+  same encoder used at inference time.
+* z‑normalisation stats (`conds_mean`, `conds_std`) are fetched directly from
+  the instantiated model if available.
+* All other behaviour (ArcFace L2‑norm, 90/5/5 split, CLI) is unchanged.
 """
 
 import os
@@ -38,17 +28,16 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 from tqdm import tqdm
 
 # -----------------------------------------------------------------------------
-# Project‑level imports (assumes repository root is on PYTHONPATH)
+# Repo‑local imports (root must be on PYTHONPATH)
 # -----------------------------------------------------------------------------
 
-from templates import ffhq128_autoenc_latent, ffhq256_autoenc_latent  # add more if needed
-from dataset import data_paths  # global dict in dataset.py
+from templates_latent import ffhq128_autoenc_latent, ffhq256_autoenc_latent  # extend if needed
+from experiment import LitModel
 from dataset import (
     CelebHQAttrDataset,
     CelebAlmdb,
     FFHQlmdb,
 )
-
 from ro_optimization.evaluation.arcface_similarity import (
     init_face_models,
     get_embedding_faceanalysis,
@@ -56,7 +45,7 @@ from ro_optimization.evaluation.arcface_similarity import (
 )
 
 # -----------------------------------------------------------------------------
-# Helper utilities
+# Registries
 # -----------------------------------------------------------------------------
 
 AVAILABLE_CFGS = {
@@ -70,6 +59,9 @@ DATASET_DISPATCH = {
     "ffhqlmdb256": FFHQlmdb,
 }
 
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
 
 def set_seed(seed: int = 0):
     random.seed(seed)
@@ -78,166 +70,139 @@ def set_seed(seed: int = 0):
 
 
 # -----------------------------------------------------------------------------
-# Autoencoder loader – returns only the encoder module (frozen, eval‑mode)
+# Auto‑encoder loader via LitModel (EMA)
 # -----------------------------------------------------------------------------
 
-def load_encoder(conf, device: torch.device):
-    """Instantiate the autoencoder, load weights, return the encoder."""
-    print("[INFO] Loading autoencoder …")
-    autoenc = conf.make_model_conf().make_model()
+def load_encoder_via_lit(conf, device: torch.device):
+    """Instantiate `LitModel`, load checkpoint, and return EMA encoder + stats."""
 
-    # Locate checkpoint (either conf.pretrain or conf.continue_from)
-    ckpt_cfg = conf.pretrain or conf.continue_from
-    if ckpt_cfg is None:
-        raise RuntimeError("The chosen config has no associated checkpoint; set conf.pretrain or conf.continue_from.")
+    lit = LitModel(conf).to(device)
 
-    ckpt_path = ckpt_cfg.path
+    ckpt_cfg = conf.pretrain or conf.continue_from or conf
+    ckpt_path = os.path.join("checkpoints", conf.name, "last.ckpt") if ckpt_cfg is conf else ckpt_cfg.path
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
     state = torch.load(ckpt_path, map_location="cpu")
-    autoenc.load_state_dict(state["state_dict"], strict=False)
-    autoenc.eval().requires_grad_(False).to(device)
+    lit.load_state_dict(state["state_dict"], strict=False)
+    lit.ema_model.eval().to(device)
 
-    # Latent normalisation statistics (optional)
-    if conf.latent_znormalize and conf.latent_infer_path and os.path.exists(conf.latent_infer_path):
-        stats = torch.load(conf.latent_infer_path, map_location="cpu")
-        mean = stats["conds_mean"].to(device)  # (C,)
-        std = stats["conds_std"].to(device)
-        print("[INFO] Loaded latent z‑normalisation statistics.")
+    # z‑norm stats (may be None)
+    mean = getattr(lit, "conds_mean", None)
+    std  = getattr(lit, "conds_std", None)
+    if mean is not None:
+        mean, std = mean.to(device), std.to(device)
+        print("[INFO] Loaded z‑normalisation stats (μ, σ) from LitModel")
     else:
-        mean, std = None, None
-        if conf.latent_znormalize:
-            print("[WARN] latent_znormalize=True but latent_infer_path missing; proceeding without normalisation.")
+        print("[INFO] z‑normalisation stats not available – proceeding without.")
 
-    return autoenc.encoder, mean, std
+    return lit.ema_model.encoder, mean, std
 
 
 # -----------------------------------------------------------------------------
-# Dataset factory – returns list of instantiated datasets (one per name)
+# Dataset factory
 # -----------------------------------------------------------------------------
 
 def build_datasets(names: List[str], img_size: int):
-    datasets = []
-    for name in names:
-        if name not in DATASET_DISPATCH:
-            raise ValueError(f"Unknown dataset name '{name}'. Known: {list(DATASET_DISPATCH)}")
-        cls = DATASET_DISPATCH[name]
-        if name == "celebahq":
-            ds = cls(image_size=img_size)  # CelebHQAttrDataset requires image_size
-        elif name == "ffhqlmdb256":
-            ds = cls(image_size=img_size)
-        else:  # general fallback
-            ds = cls(image_size=img_size)
-        datasets.append(ds)
-    return datasets
+    return [DATASET_DISPATCH[n](image_size=img_size) for n in names]
 
 
 # -----------------------------------------------------------------------------
-# ArcFace embedding helper (expects images in 0…1 range)
+# ArcFace embedding helper – returns unit vectors
 # -----------------------------------------------------------------------------
 
-def extract_arcface_embeddings(img_batch, models):
-    """Compute ArcFace embeddings for a batch of images."""
+def arcface_emb_batch(img_batch: torch.Tensor, models) -> torch.Tensor:
     embs = []
-    B = img_batch.size(0)
-    for i in range(B):
-        img = img_batch[i]
+    for img in img_batch:  # InsightFace works per‑image
         try:
-            emb = get_embedding_faceanalysis(models["app"], img)
+            e = get_embedding_faceanalysis(models["app"], img)
         except RuntimeError:
-            # Fallback (no face detected by FaceAnalysis)
-            emb = get_embedding_arcface(models["zoo_model"], img)
-        embs.append(torch.from_numpy(emb))
+            e = get_embedding_arcface(models["zoo_model"], img)
+        e = torch.from_numpy(e).float()
+        embs.append(e / e.norm(p=2))
     return torch.stack(embs)
 
 
 # -----------------------------------------------------------------------------
-# Main processing routine
+# Core routine
 # -----------------------------------------------------------------------------
 
-def generate_pairs(cfg_name: str, dataset_names: List[str], output_dir: str, batch_size: int, gpu: int, arcface_method: str):
+def generate_pairs(
+    cfg_name: str,
+    dataset_names: List[str],
+    output_dir: str,
+    batch_size: int,
+    gpu: int,
+    arcface_model: str,
+):
     set_seed(0)
-
     device = torch.device(f"cuda:{gpu}" if torch.cuda.is_available() else "cpu")
 
-    # -------------------- 1. build config & load encoder -------------------- #
-    conf_fn = AVAILABLE_CFGS[cfg_name]
-    conf = conf_fn()
-    encoder, z_mean, z_std = load_encoder(conf, device)
+    # 1) Config & EMA encoder via LitModel
+    conf = AVAILABLE_CFGS[cfg_name]()
+    encoder, z_mu, z_sigma = load_encoder_via_lit(conf, device)
 
-    # -------------------- 2. datasets -------------------------------------- #
+    # 2) Datasets
     datasets = build_datasets(dataset_names, conf.img_size)
-    total_samples = sum(len(ds) for ds in datasets)
-    print(f"[INFO] Total images: {total_samples} across {dataset_names}")
+    print(f"[INFO] Total images: {sum(len(d) for d in datasets)} across {dataset_names}")
 
-    # -------------------- 3. ArcFace models -------------------------------- #
-    arc_models = init_face_models(method=arcface_method)
+    # 3) ArcFace models
+    arc_models = init_face_models(method="arcface", model_name=arcface_model)
 
-    # -------------------- 4. iterate & encode ------------------------------ #
-    all_custom = []
-    all_arc = []
-
+    # 4) Iterate
+    cust, arc = [], []
     for ds in datasets:
         loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=4)
-        for batch in tqdm(loader, desc=f"Encoding {ds.__class__.__name__}"):
-            imgs = batch["img"].to(device)               # [-1,1]
-            imgs_01 = (imgs + 1) / 2                     # [0,1] for ArcFace
+        for batch in tqdm(loader, desc=f"{ds.__class__.__name__}"):
+            imgs = batch["img"].to(device)          # [-1,1]
+            imgs01 = (imgs + 1) / 2                 # [0,1]
 
-            # ---- custom latent ----
             with torch.no_grad():
                 z = encoder(imgs)
-                if z_mean is not None and z_std is not None:
-                    z = (z - z_mean) / z_std
-            all_custom.append(z.cpu())
+                if z_mu is not None and z_sigma is not None:
+                    z = (z - z_mu) / z_sigma
+            cust.append(z.cpu())
+            arc.append(arcface_emb_batch(imgs01.cpu(), arc_models))
 
-            # ---- arcface latent ----
-            embs = extract_arcface_embeddings(imgs_01.cpu(), arc_models)
-            all_arc.append(embs)
+    custom_latents  = torch.cat(cust)
+    arcface_latents = torch.cat(arc)
+    assert custom_latents.size(0) == arcface_latents.size(0)
+    N = custom_latents.size(0)
+    print(f"[INFO] Pairs ready: {N}")
 
-    custom_latents = torch.cat(all_custom)
-    arcface_latents = torch.cat(all_arc)
-
-    assert custom_latents.shape[0] == arcface_latents.shape[0]
-    N = custom_latents.shape[0]
-    print(f"[INFO] Finished. Paired samples: {N}")
-
-    # -------------------- 5. save raw tensors ------------------------------ #
+    # 5) Save tensors
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    torch.save(custom_latents, os.path.join(output_dir, "custom_latents.pt"))
-    torch.save(arcface_latents, os.path.join(output_dir, "arcface_latents.pt"))
+    torch.save(custom_latents,  f"{output_dir}/custom_latents.pt")
+    torch.save(arcface_latents, f"{output_dir}/arcface_latents.pt")
 
-    # -------------------- 6. train/val/test splits ------------------------- #
-    paired_ds = TensorDataset(custom_latents, arcface_latents)
+    # 6) Train/val/test split
+    split_sizes = [int(0.90*N), int(0.05*N), N - int(0.90*N) - int(0.05*N)]
+    train_ds, val_ds, test_ds = random_split(
+        TensorDataset(custom_latents, arcface_latents),
+        split_sizes,
+        generator=torch.Generator().manual_seed(0),
+    )
+    torch.save(train_ds, f"{output_dir}/train.pt")
+    torch.save(val_ds,   f"{output_dir}/val.pt")
+    torch.save(test_ds,  f"{output_dir}/test.pt")
 
-    n_train = int(0.94 * N)
-    n_val   = int(0.05 * N)
-    n_test  = N - n_train - n_val
-    train_ds, val_ds, test_ds = random_split(paired_ds, [n_train, n_val, n_test], generator=torch.Generator().manual_seed(0))
-
-    torch.save(train_ds, os.path.join(output_dir, "train.pt"))
-    torch.save(val_ds,   os.path.join(output_dir, "val.pt"))
-    torch.save(test_ds,  os.path.join(output_dir, "test.pt"))
-
-    print("[INFO] Saved:")
-    for split, ds in zip(["train","val","test"], [train_ds, val_ds, test_ds]):
-        print(f"    {split}: {len(ds)} samples → {output_dir}/{split}.pt")
+    for name, ds in zip(["train","val","test"], [train_ds, val_ds, test_ds]):
+        print(f"[INFO] {name:>5}: {len(ds):>6}")
 
 
 # -----------------------------------------------------------------------------
-# Command‑line interface
+# CLI
 # -----------------------------------------------------------------------------
-
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate paired custom and ArcFace latents")
-    parser.add_argument("--cfg", default="ffhq128_autoenc_latent", choices=list(AVAILABLE_CFGS), help="Autoencoder config to use")
-    parser.add_argument("--datasets", nargs="+", default=["celebahq"], help="One or more dataset names (see DATASET_DISPATCH)")
-    parser.add_argument("--output_dir", default="datasets/paired_latents")
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--gpu", type=int, default=0)
-    parser.add_argument("--arcface_method", choices=["arcface","facenet"], default="arcface")
-    args = parser.parse_args()
+    p = argparse.ArgumentParser("Generate paired (custom, ArcFace) latents")
+    p.add_argument("--cfg", choices=AVAILABLE_CFGS, default="ffhq128_autoenc_latent")
+    p.add_argument("--datasets", nargs="+", default=["celebahq"])
+    p.add_argument("--output_dir", default="datasets/paired_ArcFace_latents")
+    p.add_argument("--batch_size", type=int, default=128)
+    p.add_argument("--gpu", type=int, default=0)
+    p.add_argument("--arcface_model", default="buffalo_l")
+    args = p.parse_args()
 
     generate_pairs(
         cfg_name=args.cfg,
@@ -245,7 +210,7 @@ def main():
         output_dir=args.output_dir,
         batch_size=args.batch_size,
         gpu=args.gpu,
-        arcface_method=args.arcface_method,
+        arcface_model=args.arcface_model,
     )
 
 

@@ -1,0 +1,68 @@
+[INFO] Using GPUs: [0, 1]
+[INFO] Total images: 30000 across ['celebahq']
+[INFO] GPU 0: 15000 samples
+[INFO] GPU 1: 15000 samples
+[Worker 0] 2025-05-22 17:35:52,833 - INFO - Starting on GPU 0
+[Worker 0] 2025-05-22 17:35:52,833 - INFO - Loading config and encoder...
+Seed set to 0
+[Worker 1] 2025-05-22 17:35:52,841 - INFO - Starting on GPU 1
+[Worker 1] 2025-05-22 17:35:52,841 - INFO - Loading config and encoder...
+Seed set to 0
+Model params: 174.19 M
+loading pretrain ... 130M
+step: 1019986
+loading latent stats ...
+[INFO GPU cuda:0] Loaded z‑normalisation stats (μ, σ) from LitModel
+[Worker 0] 2025-05-22 17:35:57,414 - INFO - Encoder loaded successfully
+[Worker 0] 2025-05-22 17:35:57,414 - INFO - Initializing ArcFace models...
+Model params: 174.19 M
+loading pretrain ... 130M
+step: 1019986
+loading latent stats ...
+[INFO GPU cuda:1] Loaded z‑normalisation stats (μ, σ) from LitModel
+[Worker 1] 2025-05-22 17:35:57,425 - INFO - Encoder loaded successfully
+[Worker 1] 2025-05-22 17:35:57,426 - INFO - Initializing ArcFace models...
+[Worker 0] 2025-05-22 17:35:58,176 - INFO - ArcFace models loaded successfully
+[Worker 0] 2025-05-22 17:35:58,176 - INFO - Processing 15000 samples total
+[Worker 0] 2025-05-22 17:35:58,176 - INFO - Processing dataset celebahq with 15000 samples
+[Worker 0] 2025-05-22 17:35:58,211 - INFO - Dataset celebahq created successfully
+[Worker 0] 2025-05-22 17:35:58,211 - INFO - DataLoader created for celebahq
+[Worker 1] 2025-05-22 17:35:58,705 - INFO - ArcFace models loaded successfully
+[Worker 1] 2025-05-22 17:35:58,705 - INFO - Processing 15000 samples total
+[Worker 1] 2025-05-22 17:35:58,705 - INFO - Processing dataset celebahq with 15000 samples
+[Worker 1] 2025-05-22 17:35:58,740 - INFO - Dataset celebahq created successfully
+[Worker 1] 2025-05-22 17:35:58,740 - INFO - DataLoader created for celebahq
+[Worker 0] 2025-05-22 17:36:18,645 - INFO - Processed 10 batches, 1280 samples so far
+[Worker 1] 2025-05-22 17:36:19,563 - INFO - Processed 10 batches, 1280 samples so far
+[Worker 0] 2025-05-22 17:36:38,570 - INFO - Processed 20 batches, 2560 samples so far
+[Worker 1] 2025-05-22 17:36:39,339 - INFO - Processed 20 batches, 2560 samples so far
+[Worker 0] 2025-05-22 17:36:58,746 - INFO - Processed 30 batches, 3840 samples so far
+[Worker 1] 2025-05-22 17:36:59,292 - INFO - Processed 30 batches, 3840 samples so far
+[Worker 0] 2025-05-22 17:37:18,180 - INFO - Processed 40 batches, 5120 samples so far
+[Worker 1] 2025-05-22 17:37:19,055 - INFO - Processed 40 batches, 5120 samples so far
+[Worker 0] 2025-05-22 17:37:38,121 - INFO - Processed 50 batches, 6400 samples so far
+[Worker 1] 2025-05-22 17:37:39,221 - INFO - Processed 50 batches, 6400 samples so far
+[Worker 0] 2025-05-22 17:37:57,954 - INFO - Processed 60 batches, 7680 samples so far
+[Worker 1] 2025-05-22 17:37:59,527 - INFO - Processed 60 batches, 7680 samples so far
+[Worker 0] 2025-05-22 17:38:17,683 - INFO - Processed 70 batches, 8960 samples so far
+[Worker 1] 2025-05-22 17:38:19,457 - INFO - Processed 70 batches, 8960 samples so far
+[Worker 0] 2025-05-22 17:38:37,853 - INFO - Processed 80 batches, 10240 samples so far
+[Worker 1] 2025-05-22 17:38:39,312 - INFO - Processed 80 batches, 10240 samples so far
+[Worker 0] 2025-05-22 17:38:58,014 - INFO - Processed 90 batches, 11520 samples so far
+[Worker 1] 2025-05-22 17:38:59,338 - INFO - Processed 90 batches, 11520 samples so far
+[Worker 0] 2025-05-22 17:39:18,097 - INFO - Processed 100 batches, 12800 samples so far
+[Worker 1] 2025-05-22 17:39:19,216 - INFO - Processed 100 batches, 12800 samples so far
+[Worker 0] 2025-05-22 17:39:38,073 - INFO - Processed 110 batches, 14080 samples so far
+[Worker 1] 2025-05-22 17:39:39,071 - INFO - Processed 110 batches, 14080 samples so far
+[Worker 0] 2025-05-22 17:39:52,568 - INFO - Concatenated 118 batches successfully
+[Worker 0] 2025-05-22 17:39:52,568 - INFO - Processed 15000 samples on GPU 0
+[Worker 0] 2025-05-22 17:39:52,610 - INFO - Results saved to datasets/paired_ArcFace_latents/temp_worker_results/worker_0_results.pt
+[Worker 1] 2025-05-22 17:39:53,284 - INFO - Concatenated 118 batches successfully
+[Worker 1] 2025-05-22 17:39:53,284 - INFO - Processed 15000 samples on GPU 1
+[Worker 1] 2025-05-22 17:39:53,326 - INFO - Results saved to datasets/paired_ArcFace_latents/temp_worker_results/worker_1_results.pt
+[INFO] Collected 15000 samples from GPU 0
+[INFO] Collected 15000 samples from GPU 1
+[INFO] Total pairs ready: 30000
+[INFO] train:  27000
+[INFO]   val:   1500
+[INFO]  test:   1500
