@@ -175,16 +175,26 @@ def generate_pairs(
     torch.save(custom_latents,  f"{output_dir}/custom_latents.pt")
     torch.save(arcface_latents, f"{output_dir}/arcface_latents.pt")
 
-    # 6) Train/val/test split
+    # 6) Train/val/test split - save actual data, not Subset objects
     split_sizes = [int(0.90*N), int(0.05*N), N - int(0.90*N) - int(0.05*N)]
     train_ds, val_ds, test_ds = random_split(
         TensorDataset(custom_latents, arcface_latents),
         split_sizes,
         generator=torch.Generator().manual_seed(0),
     )
-    torch.save(train_ds, f"{output_dir}/train.pt")
-    torch.save(val_ds,   f"{output_dir}/val.pt")
-    torch.save(test_ds,  f"{output_dir}/test.pt")
+
+    # Extract and save actual tensors
+    train_custom = torch.stack([custom_latents[i] for i in train_ds.indices])
+    train_arcface = torch.stack([arcface_latents[i] for i in train_ds.indices])
+    torch.save((train_custom, train_arcface), f"{output_dir}/train.pt")
+
+    val_custom = torch.stack([custom_latents[i] for i in val_ds.indices])
+    val_arcface = torch.stack([arcface_latents[i] for i in val_ds.indices])
+    torch.save((val_custom, val_arcface), f"{output_dir}/val.pt")
+
+    test_custom = torch.stack([custom_latents[i] for i in test_ds.indices])
+    test_arcface = torch.stack([arcface_latents[i] for i in test_ds.indices])
+    torch.save((test_custom, test_arcface), f"{output_dir}/test.pt")
 
     for name, ds in zip(["train","val","test"], [train_ds, val_ds, test_ds]):
         print(f"[INFO] {name:>5}: {len(ds):>6}")
