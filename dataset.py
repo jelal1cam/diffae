@@ -84,9 +84,8 @@ class SubsetDataset(Dataset):
 
 
 class BaseLMDB(Dataset):
-    def __init__(self, path, original_resolution, zfill: int = 5):
-        self.original_resolution = original_resolution
-        self.zfill = zfill
+    def __init__(self, path):
+        # open the LMDB
         self.env = lmdb.open(
             path,
             max_readers=32,
@@ -95,27 +94,32 @@ class BaseLMDB(Dataset):
             readahead=False,
             meminit=False,
         )
-
         if not self.env:
             raise IOError('Cannot open lmdb dataset', path)
 
         with self.env.begin(write=False) as txn:
-            self.length = int(
-                txn.get('length'.encode('utf-8')).decode('utf-8'))
+            # read length
+            self.length = int(txn.get(b'length').decode('utf-8'))
+            # peek first key to infer prefix and padding
+            cursor = txn.cursor()
+            cursor.first()                         # position at the first record
+            first_key = cursor.key().decode("utf-8")  # e.g. "None-0000001" or "256-0000123"
+            prefix, padded = first_key.split('-', 1)
+            self.prefix = prefix
+            self.zfill = len(padded)
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, index):
+        # rebuild the exact key used in LMDB
+        key = f'{self.prefix}-{str(index).zfill(self.zfill)}'.encode('utf-8')
         with self.env.begin(write=False) as txn:
-            key = f'{self.original_resolution}-{str(index).zfill(self.zfill)}'.encode(
-                'utf-8')
             img_bytes = txn.get(key)
-
+        # decode image
         buffer = BytesIO(img_bytes)
-        img = Image.open(buffer)
+        img = Image.open(buffer).convert('RGB')
         return img
-
 
 def make_transform(
     image_size,
@@ -345,6 +349,104 @@ class Bedroom_lmdb(Dataset):
         img = self.transform(img)
         return {'img': img, 'index': index}
 
+class CelebALMDBDataset(Dataset):
+    """
+    Dataset for CelebA/CelebA-HQ stored in LMDB format with attribute annotations.
+    Works with both CelebA and CelebA-HQ LMDB files.
+    """
+    
+    id_to_cls = [
+        '5_o_Clock_Shadow', 'Arched_Eyebrows', 'Attractive', 'Bags_Under_Eyes',
+        'Bald', 'Bangs', 'Big_Lips', 'Big_Nose', 'Black_Hair', 'Blond_Hair',
+        'Blurry', 'Brown_Hair', 'Bushy_Eyebrows', 'Chubby', 'Double_Chin',
+        'Eyeglasses', 'Goatee', 'Gray_Hair', 'Heavy_Makeup', 'High_Cheekbones',
+        'Male', 'Mouth_Slightly_Open', 'Mustache', 'Narrow_Eyes', 'No_Beard',
+        'Oval_Face', 'Pale_Skin', 'Pointy_Nose', 'Receding_Hairline',
+        'Rosy_Cheeks', 'Sideburns', 'Smiling', 'Straight_Hair', 'Wavy_Hair',
+        'Wearing_Earrings', 'Wearing_Hat', 'Wearing_Lipstick',
+        'Wearing_Necklace', 'Wearing_Necktie', 'Young'
+    ]
+    cls_to_id = {v: k for k, v in enumerate(id_to_cls)}
+    
+    def __init__(self,
+                 lmdb_path,
+                 attr_path,
+                 image_size=128,
+                 do_augment=False,
+                 do_normalize=True,
+                 is_celebahq=False,
+                 split_files=None):
+        
+        super().__init__()
+        self.lmdb = BaseLMDB(lmdb_path)
+        self.image_size = image_size
+        self.is_celebahq = is_celebahq
+        
+        # Load attributes
+        if is_celebahq:
+            # CelebA-HQ format: first line is count, second is header
+            with open(attr_path) as f:
+                num_images = int(f.readline().strip())
+                header = f.readline().strip().split()
+                self.df = pd.read_csv(f, sep='\s+', names=['image'] + header)
+                self.df.set_index('image', inplace=True)
+        else:
+            # Standard CelebA format
+            with open(attr_path) as f:
+                f.readline()  # Skip first line
+                self.df = pd.read_csv(f, delim_whitespace=True)
+        
+        # Filter by split if provided (for CelebA)
+        if split_files is not None:
+            self.df = self.df[self.df.index.isin(split_files)]
+        
+        # Store valid indices based on available data
+        self.valid_indices = list(range(len(self.df)))
+        
+        # Setup transforms
+        transform = [
+            transforms.Resize(image_size),
+            transforms.CenterCrop(image_size),
+        ]
+        if do_augment:
+            transform.append(transforms.RandomHorizontalFlip())
+        transform.append(transforms.ToTensor())
+        if do_normalize:
+            transform.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
+        self.transform = transforms.Compose(transform)
+    
+    def __len__(self):
+        return len(self.valid_indices)
+    
+    def __getitem__(self, index):
+        # Get the actual row from dataframe
+        actual_idx = self.valid_indices[index]
+        row = self.df.iloc[actual_idx]
+        
+        # Get image index
+        if self.is_celebahq:
+            # For CelebA-HQ: "0.jpg" -> 0
+            img_idx = int(row.name.split('.')[0])
+        else:
+            # For CelebA: "000001.jpg" -> 0 (subtract 1 because LMDB is 0-indexed)
+            img_idx = int(row.name.split('.')[0]) - 1
+        
+        # Get image from LMDB
+        img = self.lmdb[img_idx]
+        
+        # Process labels
+        labels = torch.zeros(len(self.id_to_cls), dtype=torch.float32)
+        for attr_name, value in row.items():
+            if attr_name in self.cls_to_id:
+                # Convert -1/1 to 0/1
+                labels[self.cls_to_id[attr_name]] = float((int(value) + 1) // 2)
+        
+        # Apply transforms
+        if self.transform is not None:
+            img = self.transform(img)
+        
+        return {'img': img, 'index': index, 'labels': labels}
+    
 
 class CelebAttrDataset(Dataset):
 

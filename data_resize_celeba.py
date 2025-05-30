@@ -77,11 +77,19 @@ class ImageFolder(Dataset):
 
 if __name__ == "__main__":
     from tqdm import tqdm
+    import argparse
 
-    out_path = 'datasets/celeba.lmdb'
-    in_path = 'datasets/celeba'
-    ext = 'jpg'
-    size = None
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--in_path',  type=str, required=True)
+    parser.add_argument('--out_path', type=str, required=True)
+    parser.add_argument('--ext',      type=str, default='jpg')
+    parser.add_argument('--size',     type=int, default=None)
+    args = parser.parse_args()
+
+    in_path  = args.in_path
+    out_path = args.out_path
+    ext      = args.ext
+    size     = args.size
 
     dataset = ImageFolder(in_path, ext)
     print('len:', len(dataset))
