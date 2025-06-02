@@ -113,22 +113,40 @@ def main():
 
     # Build grid
     grid_params = base_cfg.get('grid_params', {
-        'multistage_steps': [11],
-        'start_diffusion_timestep': [20],
-        'riemannian_steps': [2],
-        'reg_norm_weight': [0.9, 1.1, 1.3],
-        'wolfe_c1': [5e-3],
-        'wolfe_c2': [0.35, 0.45, 0.55],
-        'cg_precond_diag_samples': [10],
-        'cg_max_iter': [13],
-        'reg_lambda': [1e-5],
-        'max_bracket': [13],
-        'riemannian_lr_init': [1e-2]
-    })
+    'multistage_steps': [11],
+    'start_diffusion_timestep': [20],
+    'riemannian_steps': [2],
+    'reg_norm_weight': [0.5],
+    'wolfe_c1': [5e-3],
+    'wolfe_c2': [0.45],
+    'cg_precond_diag_samples': [10],
+    'cg_max_iter': [13],
+    'reg_lambda': [1e-5],
+    'max_bracket': [13],
+    'riemannian_lr_init': [1e-2],
+    'use_momentum': [True, False]
+})
 
-    full_grid = list(product(*grid_params.values()))
+    # Manually construct the grid to conditionally vary momentum_coeff
+    momentum_coeff_values = [0.3, 0.6, 0.9]  # Example values
+    grid_keys = list(grid_params.keys()) + ['momentum_coeff']
+
+    # Build configurations manually
+    full_grid = []
+    for vals in product(*grid_params.values()):
+        cfg_base = dict(zip(grid_params.keys(), vals))
+        if cfg_base['use_momentum']:
+            for coeff in momentum_coeff_values:
+                cfg_copy = cfg_base.copy()
+                cfg_copy['momentum_coeff'] = coeff
+                full_grid.append(tuple(cfg_copy[k] for k in grid_keys))
+        else:
+            cfg_copy = cfg_base.copy()
+            cfg_copy['momentum_coeff'] = 0.6  # Default value; not used
+            full_grid.append(tuple(cfg_copy[k] for k in grid_keys))
+
     random.shuffle(full_grid)
-    grid_keys = list(grid_params.keys())
+
 
     num_workers = len(gpus)
     chunks = [full_grid[i::num_workers] for i in range(num_workers)]

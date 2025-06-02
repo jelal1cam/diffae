@@ -84,8 +84,7 @@ class SubsetDataset(Dataset):
 
 
 class BaseLMDB(Dataset):
-    def __init__(self, path):
-        # open the LMDB
+    def __init__(self, path, original_resolution=None, zfill=None):
         self.env = lmdb.open(
             path,
             max_readers=32,
@@ -94,32 +93,37 @@ class BaseLMDB(Dataset):
             readahead=False,
             meminit=False,
         )
+
         if not self.env:
             raise IOError('Cannot open lmdb dataset', path)
 
         with self.env.begin(write=False) as txn:
-            # read length
             self.length = int(txn.get(b'length').decode('utf-8'))
-            # peek first key to infer prefix and padding
-            cursor = txn.cursor()
-            cursor.first()                         # position at the first record
-            first_key = cursor.key().decode("utf-8")  # e.g. "None-0000001" or "256-0000123"
-            prefix, padded = first_key.split('-', 1)
-            self.prefix = prefix
-            self.zfill = len(padded)
+
+            if original_resolution is None or zfill is None:
+                # Infer from first key (new behavior)
+                cursor = txn.cursor()
+                cursor.first()
+                first_key = cursor.key().decode("utf-8")  # e.g., "256-00000123"
+                self.original_resolution, padded = first_key.split("-", 1)
+                self.original_resolution = int(self.original_resolution)
+                self.zfill = len(padded)
+            else:
+                # Use old behavior
+                self.original_resolution = original_resolution
+                self.zfill = zfill
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, index):
-        # rebuild the exact key used in LMDB
-        key = f'{self.prefix}-{str(index).zfill(self.zfill)}'.encode('utf-8')
+        key = f"{self.original_resolution}-{str(index).zfill(self.zfill)}".encode("utf-8")
         with self.env.begin(write=False) as txn:
             img_bytes = txn.get(key)
-        # decode image
         buffer = BytesIO(img_bytes)
-        img = Image.open(buffer).convert('RGB')
+        img = Image.open(buffer).convert("RGB")
         return img
+
 
 def make_transform(
     image_size,

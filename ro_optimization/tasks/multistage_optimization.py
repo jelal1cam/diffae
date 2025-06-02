@@ -23,7 +23,7 @@ from argparse import ArgumentParser
 # Project imports
 from .entropy_time_rescaling import derive_sampling_steps
 from ..config_loader import load_riemannian_config
-from ..utils import flatten_tensor, unflatten_tensor, encode_xt_in_chunks
+from ..utils import flatten_tensor, unflatten_tensor, encode_xt_in_chunks, ensure_time_tensor
 from ..diffusion_utils import (
     DiffusionWrapper,
     get_score_fn,
@@ -104,31 +104,39 @@ def reverse_jump_explicit(
 
 def get_cross_retraction_fn(alpha_fn, sigma_fn, wrap, ae_model, latent_shape):
     """
-    Returns a factory that builds retraction_fn(s, t_src) implementing
-    Eq.(29) to retract from noise level t_src back to level s.
+    Returns a retraction function factory:
+        retractor(s, t_tensor, batch_size, device) -> retraction_fn(z, v)
+    where s is float, t_tensor is (1,), and retraction_fn is vmap-compatible.
     """
-    def retractor(s, t_src, batch_size, device):
-        s_tensor = torch.full((batch_size,), s, dtype=torch.float32, device=device)
-        src_tensor = torch.full((batch_size,), t_src,  dtype=torch.float32, device=device)
 
-        alpha_s = alpha_fn(s_tensor).view(batch_size, 1)
-        sigma_s = sigma_fn(s_tensor).view(batch_size, 1)
-        alpha_tsrc = alpha_fn(src_tensor).view(batch_size, 1)
-        sigma_tsrc = sigma_fn(src_tensor).view(batch_size, 1)
-
-        alpha_ratio = alpha_tsrc / alpha_s
-        sigma2_ratio = sigma_tsrc.pow(2) - (alpha_ratio.pow(2) * sigma_s.pow(2))
-
-        score_src = get_score_fn(wrap, ae_model.latent_net, src_tensor, latent_shape)
+    def retractor(s, t_tensor, batch_size, device):
+        # Score fn: constructed once, safe with t_tensor.shape == [1]
+        score_src = get_score_fn(wrap, ae_model.latent_net, t_tensor, latent_shape)
 
         def retraction_fn(z_flat, v_flat):
+            actual_batch = z_flat.size(0)
+
+            # Handle time tensors adaptively inside
+            s_tensor = ensure_time_tensor(torch.tensor(s, dtype=torch.float32, device=device), actual_batch)
+            t_batched = ensure_time_tensor(t_tensor, actual_batch)
+
+            alpha_s = alpha_fn(s_tensor).view(actual_batch, 1)
+            sigma_s = sigma_fn(s_tensor).view(actual_batch, 1)
+            alpha_t = alpha_fn(t_batched).view(actual_batch, 1)
+            sigma_t = sigma_fn(t_batched).view(actual_batch, 1)
+
+            alpha_ratio = alpha_t / alpha_s
+            sigma2_ratio = sigma_t.pow(2) - (alpha_ratio.pow(2) * sigma_s.pow(2))
+
             z_tilde = z_flat + v_flat
             grad = score_src(z_tilde)
+
             return (z_tilde / alpha_ratio) + (sigma2_ratio / alpha_ratio) * grad
 
         return retraction_fn
 
     return retractor
+
 
 def linear_timesteps(start_t: int, end_t: int, num_steps: int):
     """

@@ -29,7 +29,7 @@ CONFIG = {
 
     # Optimization function
     "classifier_weight": 1.,
-    "reg_norm_weight": 0.45, #['Eyeglasses':0.45, 'Similing':0.8, 'male':0.9]
+    "reg_norm_weight": 0.5, #['Eyeglasses':0.5, 'Similing':0.8, 'male':0.9]
     "reg_norm_type": "L2",
 
     # Line search parameters (used by gradient descent branch)
@@ -46,7 +46,7 @@ CONFIG = {
     "retraction_operator": "denoiser",
 
     # Momentum settings (if used in gradient descent)
-    "use_momentum": False,  # (set to False for now)
+    "use_momentum": True,  # (set to False for now)
     "momentum_coeff": 0.6,
 
     # Settings for fast calculation of Riemannian gradient via CG

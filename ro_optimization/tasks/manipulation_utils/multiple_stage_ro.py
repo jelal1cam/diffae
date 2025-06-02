@@ -110,7 +110,7 @@ def multiple_stage_ro(
                 denoiser_fn=denoiser_fn
             )
         else:
-            retract_fn = retractor(t, t + 1, batch.size(0), device)
+            retract_fn = retractor(t_tensor, t_tensor + 1, batch.size(0), device)
 
         cfg_stage = copy.deepcopy(cfg)
         cfg_stage["initial_point"] = x.detach().clone().requires_grad_(True).to(device)
