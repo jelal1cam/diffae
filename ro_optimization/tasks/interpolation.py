@@ -61,8 +61,37 @@ from experiment_classifier import ClsModel
 
 from data_geometry.riemannian_optimization.retraction import create_retraction_fn
 from data_geometry.riemannian_optimization import get_riemannian_optimizer
+from data_geometry.riemannian_optimization.geometry import efficient_riemannian_inner_product
 import torch.nn.functional as F
 
+
+@torch.no_grad()
+def path_energy_integral(score_fn, path_flat):
+    """
+    Discrete ∫₀¹‖γ̇(t)‖²_{g(γ(t))}dt  for a path γ sampled at N points.
+    *All* points must already live in the **same** coordinate system 
+    (here: z-normalised, *before* you denormalise for rendering).
+
+    Args
+    ----
+    score_fn   : callable (B,D) → (B,D)  – returned by `get_score_fn`
+    path_flat  : list[Tensor] {length N} – each (B,D)  (batch × latent-dim)
+
+    Returns
+    -------
+    E_int      : Tensor (B,)             – per-sample energy integral
+    E_segments : list[Tensor]            – energy density per segment
+    """
+    B = path_flat[0].shape[0]
+    Δt = 1.0 / (len(path_flat) - 1)      # segment length on [0,1]
+
+    E_seg, E_int = [], torch.zeros(B, device=path_flat[0].device)
+    for x_k, x_kp1 in zip(path_flat[:-1], path_flat[1:]):
+        v_k   = x_kp1 - x_k
+        e_k   = efficient_riemannian_inner_product(score_fn, x_k, v_k, v_k)  # (B,)
+        E_seg.append(e_k.detach())
+        E_int += Δt * e_k                # accumulate integral
+    return E_int.cpu(), E_seg
 
 # -----------------------------------------------------------------------------
 # Objective:  pure distance to a *target* latent
@@ -218,6 +247,41 @@ def interpolation(riem_config_path: str, gpu_id: int = 0) -> None:
     riem_trajectory_norm, metrics = riem_opt.run()
     print(f"Optimisation finished in {time.time() - start_time:.2f} s.")
 
+    # Append target frame to the normalized Riemannian trajectory
+    full_riem_traj_norm = riem_trajectory_norm + [target_norm]
+    full_riem_traj_norm_gpu = [z.to(device) for z in full_riem_traj_norm]
+    E_riem, E_riem_segs = path_energy_integral(score_fn, full_riem_traj_norm_gpu)
+
+    # -----------------------------------------------------------------
+    # Linear interpolation of denormalized semantic codes
+    # -----------------------------------------------------------------
+    n_opt_steps = len(riem_trajectory_norm)
+    n_frames = n_opt_steps + 1
+    alpha_linear = torch.linspace(0, 1, n_frames, device=device).unsqueeze(1) # (n_frames, 1)
+    # Cond/target_cond shape is (B, C, H, W). We need (n_frames, B, C, H, W)
+    # alpha_linear_bc needs to broadcast against (B, C, H, W)
+    alpha_linear_bc = alpha_linear.view(n_frames, *([1] * len(cond.shape))) # (n_frames, 1, 1, 1, 1) if latent is 4D
+    linear_semantic_traj_denorm = cond.unsqueeze(0) * (1 - alpha_linear_bc) + target_cond.unsqueeze(0) * alpha_linear_bc # (n_frames, B, C, H, W)
+
+    # Convert to list of flattened tensors format expected by render_trajectory_images
+    linear_semantic_traj_denorm_list = [flatten_tensor(step_tensor) for step_tensor in linear_semantic_traj_denorm]
+    linear_semantic_traj_norm_list = [cls_model.normalize(z)                 # ① z-normalise
+                                  for z in linear_semantic_traj_denorm_list]
+    E_lin, _ = path_energy_integral(score_fn, linear_semantic_traj_norm_list) # ② energy integral
+
+    # -----------------------------------------------------------------
+    # ----- REPORT energies ---------------------------------------------------
+    # -----------------------------------------------------------------
+    for i, (er, el) in enumerate(zip(E_riem, E_lin)):
+        print(f"sample {i:02d}:  ∫‖γ̇‖²_Riem = {er:.3f}   |   ∫‖γ̇‖²_Linear = {el:.3f}")
+
+    # ─── NEW: mean ± std across the batch ───
+    µ_riem, σ_riem = E_riem.mean().item(), E_riem.std(unbiased=False).item()
+    µ_lin , σ_lin  = E_lin.mean().item() , E_lin.std(unbiased=False).item()
+    print(f"avg ± std  :  Riem = {µ_riem:.3f} ± {σ_riem:.3f}   |   Linear = {µ_lin:.3f} ± {σ_lin:.3f}")
+    print("───────────────────────────────────────")
+
+
     # -----------------------------------------------------------------
     # -----------------------------------------------------------------
     # Visualisation
@@ -230,14 +294,11 @@ def interpolation(riem_config_path: str, gpu_id: int = 0) -> None:
     chunk_size = riem_config.get("chunk", 25)
     gif_duration_sec = riem_config.get("gif_duration_sec", 6)
 
-
     # Compute stochastic subcodes for source and target
     xT_source = encode_xt_in_chunks(ae, batch, cond, T_render, chunk_size)
     xT_target = encode_xt_in_chunks(ae, target_batch, target_cond, T_render, chunk_size)
 
     # Determine the number of steps for visualisation (optimization steps + target frame)
-    n_opt_steps = len(riem_trajectory_norm)
-    n_frames = n_opt_steps + 1
     bs, C, H, W = xT_source.shape
 
     # Spherical interpolation of subcodes across steps for the full sequence length (n_frames)
@@ -265,16 +326,9 @@ def interpolation(riem_config_path: str, gpu_id: int = 0) -> None:
     slerp_xT = slerp_xT.view(n_frames, bs, C, H, W) # Reshape to (n_frames, B, C, H, W)
 
 
-    # -----------------------------------------------------------------
-    # Riemannian Trajectory Visualisation
-    # -----------------------------------------------------------------
-
     print("\nGenerating Riemannian trajectory visualisations…")
-    # Append target frame to the normalized Riemannian trajectory
-    full_riem_traj_norm = riem_trajectory_norm + [target_norm]
     # Denormalize the full Riemannian trajectory
     full_riem_denorm_traj = [cls_model.denormalize(z.to(device)) for z in full_riem_traj_norm]
-
     # Render Riemannian trajectory images using the shared slerp_xT
     imgs_riem = render_trajectory_images(
         ae,
@@ -290,24 +344,12 @@ def interpolation(riem_config_path: str, gpu_id: int = 0) -> None:
     visualize_trajectory(imgs_riem, os.path.join(out_dir, "traj_riem.png"))
     save_gif_from_rendered_images(imgs_riem, os.path.join(out_dir, "traj_riem.gif"), duration_sec=gif_duration_sec)
     save_comparison_image(imgs_riem, os.path.join(out_dir, "comparison_riem.png")) # Still useful to see start/end Riem
-
     print(f"Riemannian visualisations (including target frame) saved to → {out_dir}")
 
     # -----------------------------------------------------------------
     # Baseline Linear + Slerp Trajectory Visualisation
     # -----------------------------------------------------------------
     print("\nGenerating baseline linear interpolation trajectory visualisations…")
-
-    # Linear interpolation of denormalized semantic codes
-    alpha_linear = torch.linspace(0, 1, n_frames, device=device).unsqueeze(1) # (n_frames, 1)
-    # Cond/target_cond shape is (B, C, H, W). We need (n_frames, B, C, H, W)
-    # alpha_linear_bc needs to broadcast against (B, C, H, W)
-    alpha_linear_bc = alpha_linear.view(n_frames, *([1] * len(cond.shape))) # (n_frames, 1, 1, 1, 1) if latent is 4D
-    linear_semantic_traj_denorm = cond.unsqueeze(0) * (1 - alpha_linear_bc) + target_cond.unsqueeze(0) * alpha_linear_bc # (n_frames, B, C, H, W)
-
-    # Convert to list of flattened tensors format expected by render_trajectory_images
-    linear_semantic_traj_denorm_list = [flatten_tensor(step_tensor) for step_tensor in linear_semantic_traj_denorm]
-
     # Render Linear + Slerp trajectory images using the shared slerp_xT
     imgs_linear = render_trajectory_images(
         ae,
@@ -323,10 +365,7 @@ def interpolation(riem_config_path: str, gpu_id: int = 0) -> None:
     visualize_trajectory(imgs_linear, os.path.join(out_dir, "traj_linear.png"))
     save_gif_from_rendered_images(imgs_linear, os.path.join(out_dir, "traj_linear.gif"), duration_sec=gif_duration_sec)
     save_comparison_image(imgs_linear, os.path.join(out_dir, "comparison_linear.png")) # Still useful to see start/end Linear
-
-
     print(f"Baseline linear visualisations (including target frame) saved to → {out_dir}")
-
 
     # -----------------------------------------------------------------
     # Comparison Visualisation
@@ -337,7 +376,6 @@ def interpolation(riem_config_path: str, gpu_id: int = 0) -> None:
         imgs_linear,
         os.path.join(out_dir, "comparison_riem_vs_linear.png")
     )
-
     print(f"Comparison visualisations saved to → {out_dir}")
 
 
