@@ -10,9 +10,16 @@ scipy>=1.10.0
 pandas>=2.0.0
 lmdb>=1.4.0
 
+# Visualisation
+matplotlib>=3.8.0
+
 # Evaluation
 pytorch-fid>=0.3.0
 lpips>=0.1.4
+
+# Face Alignment
+dlib>=19.24.0
+requests>=2.31.0
 
 # Utilities
 tqdm
