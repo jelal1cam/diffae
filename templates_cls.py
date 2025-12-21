@@ -22,7 +22,7 @@ def ffhq128_autoenc_cls():
     conf.lower_trainable_snr = 1
     return conf
 
-def ffhq128_autoenc_non_linear_cls():
+def ffhq128_autoenc_cls_non_linear():
     conf = ffhq128_autoenc_130M()
     conf.autoenc_config = ffhq128_autoenc_latent()
     conf.train_mode = TrainMode.manipulate

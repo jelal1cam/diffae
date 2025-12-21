@@ -6,7 +6,7 @@ CONFIG = {
     "ro_SNR": 124, #SNR at which Riemannian optimization takes place
     "reg_lambda": 1e-5,
     "riemannian_steps": 25,
-    "riemannian_lr_init": 2e-2, #5e-3,
+    "riemannian_lr_init": 2e-2,
     
     # Optimizer selection:
     "optimizer_type": "gradient_descent",  # Choices:["gradient_descent", "trust_region"]

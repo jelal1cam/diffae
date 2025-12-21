@@ -9,3 +9,13 @@ ro_results
 ro_optimization/ro_results
 
 .ipynb_checkpoints/
+
+# Personal helper notebooks (not tracked)
+_helper/
+
+# Claude Code configuration
+.claude/
+CLAUDE.md
+
+# macOS system files
+.DS_Store
