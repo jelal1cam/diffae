@@ -68,13 +68,13 @@ class LitModel(pl.LightningModule):
 
         if conf.pretrain is not None:
             print(f'loading pretrain ... {conf.pretrain.name}')
-            state = torch.load(conf.pretrain.path, map_location='cpu')
+            state = torch.load(conf.pretrain.path, map_location='cpu', weights_only=False)
             print('step:', state['global_step'])
             self.load_state_dict(state['state_dict'], strict=False)
 
         if conf.latent_infer_path is not None:
             print('loading latent stats ...')
-            state = torch.load(conf.latent_infer_path)
+            state = torch.load(conf.latent_infer_path, weights_only=False)
             self.conds = state['conds']
             self.register_buffer('conds_mean', state['conds_mean'][None, :])
             self.register_buffer('conds_std', state['conds_std'][None, :])
