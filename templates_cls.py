@@ -32,6 +32,7 @@ def ffhq128_autoenc_cls_non_linear():
     conf.batch_size = 64
     conf.lr = 5e-4
     conf.total_samples = 300_000
+    conf.num_workers = 0  # Single-threaded data loading (avoids CUDA/fork issues)
     # Use the pretraining trick instead of continuing training.
     conf.pretrain = PretrainConfig(
         '130M',

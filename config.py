@@ -318,16 +318,16 @@ class TrainConfig(BaseConfig):
                                          drop_last=True)
         else:
             sampler = None
+        workers = num_worker if num_worker is not None else self.num_workers
         return DataLoader(
             dataset,
             batch_size=batch_size or self.batch_size,
             sampler=sampler,
-            # with sampler, use the sample instead of this option
             shuffle=False if sampler else shuffle,
-            num_workers=num_worker or self.num_workers,
+            num_workers=workers,
             pin_memory=True,
             drop_last=drop_last,
-            multiprocessing_context=get_context('fork'),
+            persistent_workers=workers > 0,  # Keep workers alive between batches
         )
 
     def make_model_conf(self):
