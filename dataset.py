@@ -120,6 +120,19 @@ class BaseLMDB(Dataset):
         key = f"{self.original_resolution}-{str(index).zfill(self.zfill)}".encode("utf-8")
         with self.env.begin(write=False) as txn:
             img_bytes = txn.get(key)
+            if img_bytes is None:
+                # Debug: show what keys actually exist
+                cursor = txn.cursor()
+                cursor.first()
+                sample_keys = []
+                for i, (k, _) in enumerate(cursor):
+                    if i >= 5:
+                        break
+                    sample_keys.append(k.decode('utf-8'))
+                raise KeyError(
+                    f"Key not found: {key.decode('utf-8')}. "
+                    f"Sample keys in LMDB: {sample_keys}"
+                )
         buffer = BytesIO(img_bytes)
         img = Image.open(buffer).convert("RGB")
         return img
@@ -379,10 +392,19 @@ class CelebALMDBDataset(Dataset):
                  do_augment=False,
                  do_normalize=True,
                  is_celebahq=False,
-                 split_files=None):
-        
+                 split_files=None,
+                 original_resolution=None,
+                 zfill=None):
+
         super().__init__()
-        self.lmdb = BaseLMDB(lmdb_path)
+        # Set defaults based on dataset type
+        # Note: CelebA LMDB uses "None" as resolution prefix due to how it was created
+        if original_resolution is None:
+            original_resolution = 256 if is_celebahq else "None"
+        if zfill is None:
+            zfill = 5 if is_celebahq else 7
+
+        self.lmdb = BaseLMDB(lmdb_path, original_resolution=original_resolution, zfill=zfill)
         self.image_size = image_size
         self.is_celebahq = is_celebahq
         
