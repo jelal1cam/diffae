@@ -30,7 +30,7 @@ from ro_optimization.evaluation.arcface_similarity import (
     get_embedding_faceanalysis,
     get_embedding_arcface,
 )
-from ro_optimization.evaluation.align import AlignmentModel
+from ro_optimization.evaluation.fast_arcface_similarity.align import AlignmentModel
 
 # Import config loaders
 from templates_latent import ffhq128_autoenc_latent, ffhq256_autoenc_latent
@@ -131,7 +131,7 @@ def evaluate_alignment(
     # Load encoder via LitModel
     lit = LitModel(autoenc_conf).to(device)
     autoenc_ckpt = os.path.join("checkpoints", autoenc_conf.name, "last.ckpt")
-    state = torch.load(autoenc_ckpt, map_location="cpu")
+    state = torch.load(autoenc_ckpt, map_location="cpu", weights_only=False)
     lit.load_state_dict(state["state_dict"], strict=False)
     lit.ema_model.eval()
     encoder = lit.ema_model.encoder

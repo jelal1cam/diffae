@@ -945,7 +945,7 @@ def train(conf: TrainConfig, gpus, nodes=1, mode: str = 'train'):
         eval_path = conf.eval_path or checkpoint_path
         # conf.eval_num_images = 50
         print('loading from:', eval_path)
-        state = torch.load(eval_path, map_location='cpu')
+        state = torch.load(eval_path, map_location='cpu', weights_only=False)
         print('step:', state['global_step'])
         model.load_state_dict(state['state_dict'])
         # trainer.fit(model)

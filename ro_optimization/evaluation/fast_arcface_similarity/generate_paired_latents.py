@@ -83,7 +83,7 @@ def load_encoder_via_lit(conf, device: torch.device):
     if not os.path.exists(ckpt_path):
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-    state = torch.load(ckpt_path, map_location="cpu")
+    state = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     lit.load_state_dict(state["state_dict"], strict=False)
     lit.ema_model.eval().to(device)
 
@@ -152,7 +152,7 @@ def generate_pairs(
     # 4) Iterate
     cust, arc = [], []
     for ds in datasets:
-        loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=4)
+        loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0)
         for batch in tqdm(loader, desc=f"{ds.__class__.__name__}"):
             imgs = batch["img"].to(device)          # [-1,1]
             imgs01 = (imgs + 1) / 2                 # [0,1]

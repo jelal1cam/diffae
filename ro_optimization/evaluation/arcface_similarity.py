@@ -223,7 +223,7 @@ def evaluate_manipulation_dir(image_dir, method="arcface", model_name="buffalo_l
         raise FileNotFoundError(f"Original images not found at {orig_path}")
     
     # Load original images
-    orig = torch.load(orig_path)
+    orig = torch.load(orig_path, weights_only=False)
     print(f"[INFO] Loaded original images: {orig.shape}")
     
     # Initialize models once
@@ -234,7 +234,7 @@ def evaluate_manipulation_dir(image_dir, method="arcface", model_name="buffalo_l
     # Process linear edits if they exist
     lin_path = os.path.join(image_dir, "linear_imgs.pt")
     if os.path.exists(lin_path):
-        lin_imgs = torch.load(lin_path)
+        lin_imgs = torch.load(lin_path, weights_only=False)
         print(f"[INFO] Processing linear edits...")
         
         # Compute similarities
@@ -261,7 +261,7 @@ def evaluate_manipulation_dir(image_dir, method="arcface", model_name="buffalo_l
     # Process Riemannian best edits if they exist
     riem_best_path = os.path.join(image_dir, "riemannian_best_imgs.pt")
     if os.path.exists(riem_best_path):
-        riem_best = torch.load(riem_best_path)
+        riem_best = torch.load(riem_best_path, weights_only=False)
         print(f"[INFO] Processing best Riemannian edits...")
         
         # Compute similarities
@@ -297,7 +297,7 @@ def evaluate_manipulation_dir(image_dir, method="arcface", model_name="buffalo_l
             
             for seed_file in sorted(seed_files):
                 seed_num = int(seed_file.split("_")[1].split(".")[0])
-                seed_imgs = torch.load(os.path.join(riem_dir, seed_file))
+                seed_imgs = torch.load(os.path.join(riem_dir, seed_file), weights_only=False)
                 
                 print(f"[INFO] Processing seed {seed_num}...")
                 

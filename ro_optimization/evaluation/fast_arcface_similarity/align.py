@@ -153,17 +153,18 @@ def build_alignment_net(cfg):
     if arch == "linear":
         core = LinearAlignNet(dim=cfg.custom_latent_dim)
     elif arch == "mlp":
-        hidden = cfg.get("hidden_dims", [1024])[0] if cfg.hidden_dims else 1024
+        hidden_dims = getattr(cfg, "hidden_dims", [1024])
+        hidden = hidden_dims[0] if hidden_dims else 1024
         core = MLPSkipAlignNet(
             in_dim      = cfg.custom_latent_dim,
             out_dim     = cfg.arcface_latent_dim,
             hidden_dim  = hidden,
-            n_layers    = cfg.get("num_layers", 6),
-            skip_layers = tuple(cfg.get("skip_layers", (2, 4))),
-            activation  = cfg.get("activation", "silu"),
-            use_norm    = cfg.get("use_norm", True),
-            dropout     = cfg.get("dropout", 0.1),
-            last_act    = cfg.get("last_act", "none"),
+            n_layers    = getattr(cfg, "num_layers", 6),
+            skip_layers = tuple(getattr(cfg, "skip_layers", (2, 4))),
+            activation  = getattr(cfg, "activation", "silu"),
+            use_norm    = getattr(cfg, "use_norm", True),
+            dropout     = getattr(cfg, "dropout", 0.1),
+            last_act    = getattr(cfg, "last_act", "none"),
         )
     else:
         raise ValueError(f"Unknown architecture {arch}")
@@ -181,16 +182,24 @@ def build_alignment_net(cfg):
 
 class AlignmentModel(pl.LightningModule):
     """Lightning module for training the alignment network."""
-    
-    def __init__(self, config: Dict[str, Any]):
+
+    def __init__(self, config: Dict[str, Any] = None, **kwargs):
         super().__init__()
+
+        # Handle loading from checkpoint (config=None, hparams in kwargs)
+        if config is None:
+            from types import SimpleNamespace
+            config = SimpleNamespace(**kwargs)
+
         self.config = config
 
         if hasattr(config, 'to_dict'):
             config_dict = config.to_dict()
+        elif hasattr(config, '__dict__'):
+            config_dict = vars(config)
         else:
             config_dict = config
-        
+
         self.save_hyperparameters(config_dict)
             
         # Initialize network
@@ -203,7 +212,7 @@ class AlignmentModel(pl.LightningModule):
         
         # Loss function
         self.loss_type = config.loss_type
-        self.mse_weight = config.get("mse_weight", 0.1)
+        self.mse_weight = getattr(config, "mse_weight", 0.1)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.alignment_net(x)
@@ -441,12 +450,12 @@ class AlignmentDataModule(pl.LightningDataModule):
         """Load the pre-computed paired latents."""
         if stage in (None, "fit"):
             # Load training data - now saved as tuple (custom_tensors, arcface_tensors)
-            train_data = torch.load(self.data_dir / "train.pt")
+            train_data = torch.load(self.data_dir / "train.pt", weights_only=False)
             train_custom, train_arcface = train_data
             self.train_dataset = TensorDataset(train_custom, train_arcface)
             
             # Load validation data
-            val_data = torch.load(self.data_dir / "val.pt")
+            val_data = torch.load(self.data_dir / "val.pt", weights_only=False)
             val_custom, val_arcface = val_data
             self.val_dataset = TensorDataset(val_custom, val_arcface)
             
@@ -455,7 +464,7 @@ class AlignmentDataModule(pl.LightningDataModule):
         
         if stage in (None, "test"):
             # Load test data
-            test_data = torch.load(self.data_dir / "test.pt")
+            test_data = torch.load(self.data_dir / "test.pt", weights_only=False)
             test_custom, test_arcface = test_data
             self.test_dataset = TensorDataset(test_custom, test_arcface)
             
