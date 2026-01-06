@@ -48,6 +48,9 @@ def ffhq128_autoenc_cls_non_linear():
     conf.lower_trainable_snr = 1
     return conf
 
+# Alias for compatibility with supervisor's ro_optimization scripts
+ffhq128_autoenc_non_linear_cls = ffhq128_autoenc_cls_non_linear
+
 def ffhq128_autoenc_non_linear_time_cls():
     conf = ffhq128_autoenc_non_linear_cls()
     #conf.autoenc_config.T_eval = 1000
