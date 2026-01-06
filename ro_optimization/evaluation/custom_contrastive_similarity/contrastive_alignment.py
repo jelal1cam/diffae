@@ -172,9 +172,9 @@ class ContrastiveLatentDataset(Dataset):
             img_tensor = img.unsqueeze(0).to(self.device)
             aug_img_tensor = aug_img.unsqueeze(0).to(self.device)
             
-            # Encode
-            z_orig = self.encoder(img_tensor).squeeze(0)
-            z_aug = self.encoder(aug_img_tensor).squeeze(0)
+            # Encode and flatten to 1D
+            z_orig = self.encoder(img_tensor).flatten()
+            z_aug = self.encoder(aug_img_tensor).flatten()
             
             # Apply z-normalization if available
             if self.z_mean is not None and self.z_std is not None:
@@ -249,16 +249,24 @@ class InfoNCELoss(nn.Module):
 
 class ContrastiveAlignmentModel(pl.LightningModule):
     """Lightning module for training alignment network with contrastive learning."""
-    
-    def __init__(self, config: Dict[str, Any]):
+
+    def __init__(self, config: Dict[str, Any] = None, **kwargs):
         super().__init__()
+
+        # Handle loading from checkpoint (config=None, hparams in kwargs)
+        if config is None:
+            from types import SimpleNamespace
+            config = SimpleNamespace(**kwargs)
+
         self.config = config
-        
+
         if hasattr(config, 'to_dict'):
             config_dict = config.to_dict()
+        elif hasattr(config, '__dict__'):
+            config_dict = vars(config)
         else:
             config_dict = config
-        
+
         self.save_hyperparameters(config_dict)
         
         # Build alignment network
@@ -301,14 +309,23 @@ class ContrastiveAlignmentModel(pl.LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.alignment_net(x)
     
+    def _ensure_2d(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Ensure tensor is 2D [N, D] for contrastive loss."""
+        if tensor.dim() == 1:
+            return tensor.unsqueeze(0)
+        elif tensor.dim() == 3:
+            # [N, 1, D] -> [N, D]
+            return tensor.squeeze(1)
+        return tensor
+
     def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int):
-        z_orig = batch['z_orig']
-        z_aug = batch['z_aug']
-        
+        z_orig = self._ensure_2d(batch['z_orig'])
+        z_aug = self._ensure_2d(batch['z_aug'])
+
         # Forward pass through alignment network
-        h_orig = self.alignment_net(z_orig)
-        h_aug = self.alignment_net(z_aug)
-        
+        h_orig = self._ensure_2d(self.alignment_net(z_orig))
+        h_aug = self._ensure_2d(self.alignment_net(z_aug))
+
         # Compute contrastive loss
         loss = self.criterion(h_orig, h_aug)
         
@@ -323,15 +340,15 @@ class ContrastiveAlignmentModel(pl.LightningModule):
         return loss
     
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int):
-        z_orig = batch['z_orig']
-        z_aug = batch['z_aug']
-        
+        z_orig = self._ensure_2d(batch['z_orig'])
+        z_aug = self._ensure_2d(batch['z_aug'])
+
         # Forward pass with both networks
-        h_orig = self.alignment_net(z_orig)
-        h_aug = self.alignment_net(z_aug)
-        
-        h_orig_ema = self.ema_alignment_net(z_orig)
-        h_aug_ema = self.ema_alignment_net(z_aug)
+        h_orig = self._ensure_2d(self.alignment_net(z_orig))
+        h_aug = self._ensure_2d(self.alignment_net(z_aug))
+
+        h_orig_ema = self._ensure_2d(self.ema_alignment_net(z_orig))
+        h_aug_ema = self._ensure_2d(self.ema_alignment_net(z_aug))
         
         # Compute losses
         loss = self.criterion(h_orig, h_aug)

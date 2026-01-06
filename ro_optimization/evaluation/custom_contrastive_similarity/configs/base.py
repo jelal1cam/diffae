@@ -8,7 +8,7 @@ def get_config():
     # ===================================================================
     # Data Configuration
     # ===================================================================
-    cfg.dataset_names = ["celebahq", "ffhqlmdb"]  # Can use multiple datasets
+    cfg.dataset_names = ["celebahq"]  # CelebA-HQ only (add "ffhqlmdb" if FFHQ available)
     cfg.img_size = 128  # Should match your encoder's expected input size
     cfg.encoder_config = "ffhq128"  # "ffhq128" or "ffhq256"
     cfg.augmentation_strength = 1.0  # Scale factor for augmentation intensity
@@ -19,9 +19,9 @@ def get_config():
     cfg.architecture = "mlp"  # Currently only "mlp" with skip connections
     cfg.input_dim = 512  # Custom encoder latent dimension
     cfg.output_dim = 128  # Output dimension for distance space (can be smaller)
-    cfg.hidden_dim = 2048  # Hidden layer dimension
-    cfg.num_layers = 8  # Number of layers
-    cfg.skip_layers = list(range(1, cfg.num_layers))  # Skip connections at all layers
+    cfg.hidden_dim = 1024  # Hidden layer dimension
+    cfg.num_layers = 6  # Number of layers
+    cfg.skip_layers = []  # No skip connections - avoids dimension mismatch bug
     cfg.activation = "silu"  # Activation function
     cfg.last_act = "none"  # No activation before normalization
     cfg.use_norm = True  # Layer normalization
@@ -63,7 +63,7 @@ def get_config():
     # ===================================================================
     # Hardware Configuration
     # ===================================================================
-    cfg.num_workers = 8  # DataLoader workers
+    cfg.num_workers = 0  # Must be 0 - dataset encodes on CUDA in __getitem__
     cfg.accelerator = "gpu"  # Accelerator type
     cfg.devices = 1  # Number of GPUs
     cfg.device = 0  # GPU device index for encoder
