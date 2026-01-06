@@ -25,3 +25,10 @@ data_geometry/
 
 # Strategy and planning documents (not tracked)
 _strategy/
+
+# Investigation notebooks for DataGeometry testing (not tracked)
+_investigation/
+
+# Training logs and output
+logs/
+*.log
