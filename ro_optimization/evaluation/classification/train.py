@@ -6,8 +6,8 @@ from pytorch_lightning.callbacks import (
     RichProgressBar, RichModelSummary
 )
 from pytorch_lightning.loggers import TensorBoardLogger
-from .lit_module import AttrClassifier
-from .config import get_config
+from ro_optimization.evaluation.classification.lit_module import AttrClassifier
+from ro_optimization.evaluation.classification.config import get_config
 import torch
 
 
@@ -84,6 +84,18 @@ def train_stage1(cfg):
         # Pass full config for other settings
         cfg=cfg
     )
+
+    # CRITICAL FIX: Freeze backbone to prevent feature destruction
+    # The pretrained ResNet features are being destroyed by high LR before classifier learns
+    print("Freezing backbone - training classifier head only...")
+    for param in model.model.net.parameters():
+        param.requires_grad = False
+    # CRITICAL: Put backbone in eval mode so BatchNorm uses pretrained statistics
+    model.model.net.eval()
+    # Count trainable params (should be ~82K for classifier only)
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Trainable parameters: {trainable:,} (classifier head only)")
+    print("Backbone in eval mode (BatchNorm uses pretrained running stats)")
     
     # Setup callbacks
     callbacks, checkpoint_callback = setup_callbacks(cfg, "first_stage")
@@ -119,6 +131,10 @@ def train_stage2(cfg, pretrained_checkpoint):
     print("="*60)
     
     # Load pretrained model with updated parameters
+    # Note: weights_only=False needed for PyTorch 2.6+ due to ConfigDict in checkpoint
+    import torch
+    torch.serialization.add_safe_globals([type(cfg)])  # Allow ConfigDict
+
     model = AttrClassifier.load_from_checkpoint(
         pretrained_checkpoint,
         # Update paths and settings for CelebA-HQ

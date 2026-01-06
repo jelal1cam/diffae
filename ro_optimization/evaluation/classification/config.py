@@ -10,16 +10,16 @@ def get_config():
     # ----------------------------------------------------------------
     cfg.data = ConfigDict()
     
-    # CelebA paths
+    # CelebA paths (relative to repo root - run from ~/diffae on server)
     cfg.data.celeba = ConfigDict()
-    cfg.data.celeba.lmdb_file = "/home/gb511/diffae/datasets/celeba/celeba.lmdb"
-    cfg.data.celeba.attr_file = "/home/gb511/diffae/datasets/celeba/list_attr_celeba.txt"
-    cfg.data.celeba.partition_file = "/home/gb511/diffae/datasets/celeba/list_eval_partition.txt"
-    
-    # CelebA-HQ paths
+    cfg.data.celeba.lmdb_file = "datasets/celeba.lmdb"
+    cfg.data.celeba.attr_file = "datasets/celeba_anno/list_attr_celeba.txt"
+    cfg.data.celeba.partition_file = "datasets/celeba_anno/list_eval_partition.txt"
+
+    # CelebA-HQ paths (relative to repo root)
     cfg.data.celebahq = ConfigDict()
-    cfg.data.celebahq.lmdb_file = "/home/gb511/diffae/datasets/celebahq256.lmdb"
-    cfg.data.celebahq.attr_file = "/home/gb511/diffae/datasets/celeba_anno/CelebAMask-HQ-attribute-anno.txt"
+    cfg.data.celebahq.lmdb_file = "datasets/celebahq256.lmdb"
+    cfg.data.celebahq.attr_file = "datasets/celeba_anno/CelebAMask-HQ-attribute-anno.txt"
     
     # ----------------------------------------------------------------
     # Model architecture
@@ -111,9 +111,9 @@ def get_config():
     # DataLoader settings
     # ----------------------------------------------------------------
     cfg.dataloader = ConfigDict()
-    cfg.dataloader.num_workers = 8
+    cfg.dataloader.num_workers = 0  # Must be 0 - LMDB causes segfaults with multiprocessing
     cfg.dataloader.pin_memory = True
-    cfg.dataloader.persistent_workers = True
+    cfg.dataloader.persistent_workers = False  # Can't use with num_workers=0
     cfg.dataloader.drop_last = True  # for training
     
     # ----------------------------------------------------------------

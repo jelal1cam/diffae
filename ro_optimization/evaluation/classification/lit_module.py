@@ -6,9 +6,9 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 import torchmetrics
-from .model import ResNetAttrClassifier
+from ro_optimization.evaluation.classification.model import ResNetAttrClassifier
 from dataset import CelebALMDBDataset
-from .data_utils import load_celeba_splits, compute_pos_weight
+from ro_optimization.evaluation.classification.data_utils import load_celeba_splits, compute_pos_weight
 
 
 class AttrClassifier(pl.LightningModule):
@@ -124,14 +124,29 @@ class AttrClassifier(pl.LightningModule):
             
             print(f"CelebA-HQ - Train: {len(self.train_dataset)}, Val: {len(self.val_dataset)}")
         
-        # Compute positive weights
+        # Compute positive weights and copy to buffer (don't shadow the buffer!)
         print("Computing class weights...")
         max_weight = self.cfg.loss.pos_weight_cap if self.cfg else 10.0
-        self.pos_weight = compute_pos_weight(self.train_dataset, max_weight=max_weight)
+        computed_weights = compute_pos_weight(self.train_dataset, max_weight=max_weight)
+        self.pos_weight.copy_(computed_weights)  # Update buffer in-place
+        print(f"Pos weights range: {self.pos_weight.min():.2f} - {self.pos_weight.max():.2f}")
     
     def forward(self, x):
         return self.model(x)
-    
+
+    def on_train_epoch_start(self):
+        """Keep backbone in eval mode for frozen training.
+
+        PyTorch Lightning calls .train() on the model at epoch start,
+        which would put BatchNorm layers in train mode (using batch stats).
+        We need BatchNorm to use pretrained running stats, so we put
+        the backbone back in eval mode.
+        """
+        # Check if any backbone params are frozen
+        backbone_frozen = not any(p.requires_grad for p in self.model.net.parameters())
+        if backbone_frozen:
+            self.model.net.eval()
+
     def compute_loss(self, logits, labels):
         """Compute weighted BCE loss."""
         return F.binary_cross_entropy_with_logits(
@@ -142,14 +157,29 @@ class AttrClassifier(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         imgs = batch['img']
         labels = batch['labels']
-        
+
         logits = self(imgs)
         loss = self.compute_loss(logits, labels)
-        
+
         # Update metrics
         preds = torch.sigmoid(logits)
         self.train_auroc.update(preds, labels.int())
-        
+
+        # Debug: print logit statistics every 500 steps
+        if batch_idx % 500 == 0 and batch_idx > 0:
+            print(f"\n[DEBUG] Step {batch_idx}:")
+            print(f"  Logits: min={logits.min():.3f}, max={logits.max():.3f}, mean={logits.mean():.3f}, std={logits.std():.3f}")
+            print(f"  Preds:  min={preds.min():.3f}, max={preds.max():.3f}, mean={preds.mean():.3f}")
+            print(f"  Labels: sum={labels.sum():.0f}, mean={labels.mean():.3f}")
+            # Check if predictions vary across SAMPLES for same attribute
+            # std across samples (dim=0) for each attribute, then mean across attributes
+            per_attr_std = preds.std(dim=0).mean()  # Should be >0.1 if discriminating
+            print(f"  Per-attr sample std: {per_attr_std:.4f} (should be >0.1)")
+            # Show first 5 attrs for first 3 samples
+            print(f"  Sample predictions (first 5 attrs):")
+            for i in range(min(3, preds.shape[0])):
+                print(f"    Sample {i}: {preds[i, :5].tolist()}")
+
         self.log('train_loss', loss, prog_bar=True)
         return loss
     
@@ -177,6 +207,30 @@ class AttrClassifier(pl.LightningModule):
         # Log AUROC
         auroc = self.val_auroc.compute()
         self.log('val_auroc', auroc, prog_bar=True)
+
+        # Debug: print per-attribute AUROC to check if any attributes work
+        if self.current_epoch == 0:
+            print("\n[DEBUG] Per-attribute AUROC (epoch 0):")
+            attr_names = [
+                '5_o_Clock_Shadow', 'Arched_Eyebrows', 'Attractive', 'Bags_Under_Eyes',
+                'Bald', 'Bangs', 'Big_Lips', 'Big_Nose', 'Black_Hair', 'Blond_Hair',
+                'Blurry', 'Brown_Hair', 'Bushy_Eyebrows', 'Chubby', 'Double_Chin',
+                'Eyeglasses', 'Goatee', 'Gray_Hair', 'Heavy_Makeup', 'High_Cheekbones',
+                'Male', 'Mouth_Slightly_Open', 'Mustache', 'Narrow_Eyes', 'No_Beard',
+                'Oval_Face', 'Pale_Skin', 'Pointy_Nose', 'Receding_Hairline',
+                'Rosy_Cheeks', 'Sideburns', 'Smiling', 'Straight_Hair', 'Wavy_Hair',
+                'Wearing_Earrings', 'Wearing_Hat', 'Wearing_Lipstick',
+                'Wearing_Necklace', 'Wearing_Necktie', 'Young'
+            ]
+            # Compute per-class AUROC using a separate metric
+            from torchmetrics import AUROC
+            per_class_auroc = AUROC(task='multilabel', num_labels=40, average=None).to(self.device)
+            # We need to recompute - use validation predictions stored during epoch
+            # For now, just print the average and a message about checking alignment
+            print(f"  Average AUROC: {auroc:.4f}")
+            print("  If ALL attributes are ~0.5, there's likely a label misalignment issue.")
+            print("  Key attributes to check: Male (20), Smiling (31), Eyeglasses (15)")
+
         self.val_auroc.reset()
     
     def configure_optimizers(self):
